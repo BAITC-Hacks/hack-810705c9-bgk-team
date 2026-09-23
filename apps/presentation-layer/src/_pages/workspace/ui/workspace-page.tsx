@@ -24,9 +24,12 @@ import type {
   PanelImperativeHandle,
 } from "react-resizable-panels";
 import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 import {
   calculateScore,
   getTaskSummary,
+  getWorkspaceTasks,
+  workspaceIdentity,
   readiness,
   TASK_FIELDS,
   type Message,
@@ -95,10 +98,11 @@ const FOCUS_LAYOUT: Layout = {
 };
 
 export default function WorkspacePage() {
-  return <TaskDocumentsProvider><WorkspaceLoader /></TaskDocumentsProvider>;
+  return <WorkspaceLoader />;
 }
 
 function WorkspaceLoader() {
+  const router = useRouter();
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -128,12 +132,21 @@ function WorkspaceLoader() {
   }, []);
 
   async function changeSession(next: Partial<WorkspaceSession>) {
-    await workspaceApi.session(next);
-    await load();
+    // Hide controls while cookies and workspace data move to the new identity.
+    setLoading(true);
+    try {
+      await workspaceApi.session(next);
+      router.refresh();
+      await load();
+    } catch (failure) {
+      setSnapshot(null);
+      setError(requestError(failure));
+      throw failure;
+    } finally { setLoading(false); }
   }
 
   const setData: Dispatch<SetStateAction<WorkspaceData>> = (update) => {
-    setSnapshot((current) => current ? {
+    setSnapshot((current) => current && snapshot && workspaceIdentity(current.session) === workspaceIdentity(snapshot.session) ? {
       ...current,
       ...(typeof update === "function" ? update(current) : update),
     } : current);
@@ -150,9 +163,13 @@ function WorkspaceLoader() {
     </main>
   );
 
-  if (!snapshot.session.onboardingCompleted) return <OnboardingScreen snapshot={snapshot} onComplete={load} />;
+  if (!snapshot.session.onboardingCompleted) return <OnboardingScreen snapshot={snapshot} onComplete={async () => {
+    await load();
+    router.refresh();
+  }} />;
 
-  if (!snapshot.tasks.length) return (
+  const workspaceTasks = getWorkspaceTasks(snapshot.tasks, snapshot.session.role);
+  if (!workspaceTasks.length) return (
     <main className="flex min-h-dvh items-center justify-center p-6">
       <div className="absolute top-3 right-4"><ThemeToggle /></div>
       <div className="max-w-lg space-y-5 text-center">
@@ -177,7 +194,10 @@ function WorkspaceLoader() {
     </main>
   );
 
-  return <WorkspaceContent data={snapshot} setData={setData} session={snapshot.session} onSessionChange={changeSession} onReload={load} />;
+  return <TaskDocumentsProvider key={workspaceIdentity(snapshot.session)}>
+    <WorkspaceContent data={{ ...snapshot, tasks: workspaceTasks }} setData={setData}
+      session={snapshot.session} onSessionChange={changeSession} onReload={load} />
+  </TaskDocumentsProvider>;
 }
 
 function WorkspaceContent({ data, setData, session, onSessionChange, onReload }: {

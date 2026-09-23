@@ -1,4 +1,5 @@
 export { getDemoData } from "./demo-data";
+export { getWorkspaceTasks, workspaceIdentity } from "./task-scope";
 export {
   TASK_FIELDS,
   calculateScore,

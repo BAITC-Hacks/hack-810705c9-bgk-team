@@ -3,14 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { z } from "zod";
+import { getSession, setSessionCookie } from "@/server/workspace/http";
+import { resolveSession } from "@/server/workspace/service";
 
 import {
-  ACTOR_COOKIE,
-  ROLE_COOKIE,
   VIEW_COOKIE,
   DEMO_ROLES,
   DEMO_VIEWS,
-  demoActorId,
   toDemoActor,
 } from "@/shared/lib/demo-actor";
 
@@ -41,10 +40,16 @@ export async function switchDemoRole(raw: unknown): Promise<SwitchDemoRoleResult
   const actor = toDemoActor(input.role, input.actorId);
   if (!actor) return { ok: false, error: "Неизвестный участник демо для этой роли" };
 
+  // Both product surfaces must act as the explicitly selected demo identity.
+  const current = await getSession();
+  const session = await resolveSession(actor.role === "business"
+    ? { ...current, role: "business", businessId: actor.businessId }
+    : { ...current, role: "student", teamId: actor.teamId });
+  if (!session.onboardingCompleted) return { ok: false, error: "Профиль пока недоступен. Выберите другого участника." };
+  await setSessionCookie(session);
+
   const jar = await cookies();
   const base = { path: "/", sameSite: "lax", maxAge: YEAR } as const;
-  jar.set(ROLE_COOKIE, actor.role, { ...base, httpOnly: true });
-  jar.set(ACTOR_COOKIE, demoActorId(actor), { ...base, httpOnly: true });
   if (input.view) jar.set(VIEW_COOKIE, input.view, base);
 
   revalidatePath("/", "layout");
