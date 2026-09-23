@@ -39,6 +39,16 @@ export type TaskEditorDraft = {
 };
 
 type EditorErrors = { title?: string; need?: string; confirmation?: string };
+type ScoreLine = { node: string; points: number; max: number; reason: string };
+
+const NODE_LABELS: Record<string, string> = {
+  "context.current": "Текущий процесс", "context.size": "Масштаб проблемы", "context.change": "Что изменится",
+  "data.what": "Данные и материалы", "data.volume": "Объём данных", "data.sample": "Пример данных",
+  "result.artifact": "Результат", "result.acceptance": "Формат сдачи", "criteria.items": "Критерии приёмки",
+  "constraints.deadline": "Срок", "constraints.stack": "Стек и роли", "constraints.other": "Другие ограничения",
+  "users.role": "Пользователи", "users.scale": "Количество пользователей",
+  "link.contact": "Контакт", "link.cadence": "Консультации", "link.response": "Ответ на отклик",
+};
 
 function nonemptyFields(task: Task): TaskField[] {
   return TASK_FIELDS.filter((field) => task.fields[field.key].trim()).map(
@@ -103,6 +113,15 @@ export function TaskEditor({
   onSave,
   onCancel,
 }: TaskEditorProps) {
+  const [serverScoreLines, setServerScoreLines] = useState<ScoreLine[] | null>(null);
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/tasks/${encodeURIComponent(savedTask.id)}/score`)
+      .then(async response => response.ok ? response.json() : null)
+      .then(result => { if (active) setServerScoreLines(result?.lines ?? null); })
+      .catch(() => { if (active) setServerScoreLines(null); });
+    return () => { active = false; };
+  }, [savedTask.id, savedTask.score, savedTask.version]);
   const id = useId();
   const titleRef = useRef<HTMLInputElement>(null);
   const needRef = useRef<HTMLTextAreaElement>(null);
@@ -246,6 +265,9 @@ export function TaskEditor({
           <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
             Заполните то, что знаете. Пропуски не мешают публикации.
           </p>
+          <Button asChild variant="outline" size="sm" className="mt-3">
+            <a href={`/task-match?task=${encodeURIComponent(task.id)}`}>Подробные поля и критерии приёмки</a>
+          </Button>
         </div>
 
         <section
@@ -291,7 +313,7 @@ export function TaskEditor({
             <span className="text-muted-foreground">
               {savedReadiness.label}
             </span>
-            {changed ? (
+            {changed && savedTask.score === undefined ? (
               <span className="text-muted-foreground">
                 {isPublished && !verified ? "Предпросмотр" : "После сохранения"}
                 :{" "}
@@ -310,7 +332,14 @@ export function TaskEditor({
               />
             </summary>
             <div className="mt-4 space-y-3">
-              {breakdown.map((group, index) => (
+              {savedTask.score !== undefined ? (
+                serverScoreLines ? serverScoreLines.map((line) => (
+                  <div key={line.node} className="flex items-center justify-between gap-4 text-xs">
+                    <span className="text-foreground/80">{NODE_LABELS[line.node] ?? line.node}</span>
+                    <span className="shrink-0 tabular-nums text-muted-foreground">{line.points} / {line.max}</span>
+                  </div>
+                )) : <p className="text-xs text-muted-foreground">Расшифровка временно недоступна.</p>
+              ) : breakdown.map((group, index) => (
                 <div key={group.label}>
                   <div className="flex items-center justify-between gap-4 text-[13px]">
                     <span className="text-foreground/80">{group.label}</span>

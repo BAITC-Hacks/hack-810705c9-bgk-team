@@ -1,125 +1,45 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+/** Compatibility DTOs for the current main UI. Domain writes remain ADR-owned. */
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/shared/db";
-import {
-  businesses,
-  tasks,
-  taskFields,
-  teams,
-  proposals,
-  milestones,
-  scoreEvents,
-} from "@/shared/db/schema";
+import { businesses, tasks, taskFields, teams, proposals, stages, scoreEvent, grillSession } from "@/shared/db/schema";
 import { ApiError } from "@/shared/api/errors";
+import { getDemoActor } from "@/shared/api/actor";
+import { assertTaskOwner, isDemoTeamId } from "@/shared/lib/demo-actor";
 import { validateBusinessLogoKey } from "./business-logos";
-import {
-  calculateScore,
-  createTask,
-  TASK_FIELDS,
-  type Task,
-  type Team,
-  type Proposal,
-} from "@/entities/workspace/model";
-import {
-  evaluateTask,
-  newlyConfirmedFields,
-  publicTask,
-  type WorkspaceSession,
-  type TaskUpdate,
-  type TeamInput,
-  type ProposalInput,
-  type MilestoneInput,
-  type OnboardingInput,
-  type BusinessProfile,
-} from "@/entities/workspace/contracts";
+import { taskAccess, visibleProposals } from "@/entities/access";
+import { FIELD_NODES, projectWorkspaceTask } from "@/entities/task-match/projection";
+import { projectProposal } from "@/features/task-match/api/proposals";
+import { createTask } from "@/features/task-match/api/tasks";
+import { recalculateScore } from "@/features/task-card/api/recalculate-score";
+import { getScore as canonicalScore } from "@/features/task-card/api/get-score";
+import { decideProposal as canonicalDecision } from "@/features/decide-proposal";
+import { claimStage, confirmStage } from "@/features/stage-progress/api/stage-progress";
+import { listProposalStages, getKickoff as canonicalKickoff, getTeamProgress } from "@/features/stage-progress/api/queries";
+import type { Task, Proposal, Team } from "@/entities/workspace/model";
+import type { WorkspaceSession, TaskUpdate, TeamInput, MilestoneInput, OnboardingInput, BusinessProfile } from "@/entities/workspace/contracts";
 
-type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
-type Reader = typeof db | Transaction;
-type TaskRow = typeof tasks.$inferSelect & {
-  business: typeof businesses.$inferSelect;
-  fields: (typeof taskFields.$inferSelect)[];
-};
-type ProposalRow = typeof proposals.$inferSelect & {
-  milestone: typeof milestones.$inferSelect | null;
-};
-
-function taskDto(row: TaskRow): Task {
-  const fields = Object.fromEntries(
-    TASK_FIELDS.map(({ key }) => [
-      key,
-      row.fields.find((field) => field.node === key)?.value ?? "",
-    ]),
-  ) as Task["fields"];
-  return {
-    id: row.id,
-    title: row.title,
-    company: row.business.name,
-    industry: row.business.industry,
-    description: row.description,
-    fields,
-    confirmedFields: row.fields
-      .filter((field) => field.state === "confirmed")
-      .map((field) => field.node),
-    status: row.status,
-    createdAt: row.createdAt.toISOString(),
-    publishedAt: row.publishedAt?.toISOString() ?? null,
-    version: row.version,
-  };
+type TaskRow = typeof tasks.$inferSelect;
+type FieldRow = typeof taskFields.$inferSelect;
+function taskDto(row: TaskRow, fields: FieldRow[], owner: boolean): Task {
+  const view = projectWorkspaceTask(owner ? row : { ...row, description: "" }, owner ? fields : fields.filter(f => f.state === "confirmed"));
+  // Preserve the owner's original nine-group notes without certifying them as
+  // structured ADR fields. The archive is never sent to another actor.
+  const legacyFields = row.legacyWorkspace?.fields;
+  if (owner && Array.isArray(legacyFields)) for (const item of legacyFields) {
+    if (item && typeof item === "object" && "node" in item && "value" in item && typeof item.node === "string" && typeof item.value === "string" && Object.hasOwn(FIELD_NODES,item.node)) {
+      const group = item.node as keyof Task["fields"];
+      if (!fields.some(f => FIELD_NODES[group].includes(f.node))) view.fields[group] = item.value;
+    }
+  }
+  return {...view,canEdit:owner};
 }
 function teamDto(row: typeof teams.$inferSelect): Team {
-  return {
-    id: row.id,
-    name: row.name,
-    initials: row.initials,
-    tagline: row.tagline,
-    skills: row.skills,
-    interests: row.interests,
-    members: row.members,
-    color: row.color,
-  };
+  return { id: row.id, name: row.name, initials: row.initials || row.name.slice(0,2), tagline: row.tagline, skills: row.skills, interests: row.interests, members: row.members, color: row.color };
 }
-function proposalDto(row: ProposalRow): Proposal {
-  return {
-    id: row.id,
-    taskId: row.taskId,
-    teamId: row.teamId,
-    idea: row.idea,
-    plan: row.plan,
-    timeline: row.timeline,
-    prototypeUrl: row.prototypeUrl,
-    status: row.status,
-    milestoneConfirmed: row.milestone?.status === "confirmed",
-    ...(row.milestone
-      ? {
-          milestone: {
-            title: row.milestone.title,
-            resultUrl: row.milestone.resultUrl,
-            comment: row.milestone.comment,
-          },
-        }
-      : {}),
-  };
-}
-export function requireRole(
-  session: WorkspaceSession,
-  role: WorkspaceSession["role"],
-) {
-  if (session.role !== role)
-    throw new ApiError(
-      403,
-      "ROLE_REQUIRED",
-      role === "business"
-        ? "Это действие доступно бизнесу."
-        : "Это действие доступно команде студентов.",
-    );
-}
-function requireTeam(session: WorkspaceSession, teamId: string) {
-  requireRole(session, "student");
-  if (session.teamId !== teamId)
-    throw new ApiError(
-      403,
-      "TEAM_REQUIRED",
-      "Переключитесь на команду, от имени которой хотите выполнить действие.",
-    );
+function proposalDto(row: typeof proposals.$inferSelect, rows: (typeof stages.$inferSelect)[]): Proposal {
+  const own = rows.filter(s => s.proposalId === row.id);
+  const first = own.find(s => s.status === "claimed") ?? own.find(s => s.status === "confirmed");
+  return { ...projectProposal(row, own.some(s => s.status === "confirmed")), points: own.reduce((sum,s) => sum+s.points,0), ...(first?.reportUrl ? { milestone: { title: first.metric, resultUrl: first.reportUrl, comment: first.teamComment ?? "" } } : {}) };
 }
 export async function resolveSession(
   input: WorkspaceSession,
@@ -140,8 +60,9 @@ export async function resolveSession(
   };
 }
 export async function validateSessionTeam(teamId: string) {
-  if (!(await db.query.teams.findFirst({ where: eq(teams.id, teamId) })))
-    throw new ApiError(404, "TEAM_NOT_FOUND", "Команда не найдена.");
+  if (!isDemoTeamId(teamId)) throw new ApiError(403, "forbidden", "Выберите демо-команду");
+  const [row] = await db.select({ id: teams.id }).from(teams).where(eq(teams.id,teamId));
+  if (!row) throw new ApiError(404,"TEAM_NOT_FOUND","Команда не найдена");
 }
 export async function listTeams(): Promise<Team[]> {
   return (await db.query.teams.findMany({
@@ -181,7 +102,7 @@ export async function completeOnboarding(
 }
 async function readBusinessProfile(
   businessId: string | null | undefined,
-  reader: Reader,
+  reader: typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0],
 ): Promise<BusinessProfile | null> {
   if (!businessId) return null;
   const business = await reader.query.businesses.findFirst({ where: eq(businesses.id, businessId) });
@@ -191,431 +112,127 @@ async function readBusinessProfile(
     logoUrl: business.logoKey ? `/api/business-logos/${business.logoKey}` : null,
   } : null;
 }
-async function readTask(id: string, reader: Reader = db): Promise<Task> {
-  const row = await reader.query.tasks.findFirst({
-    where: eq(tasks.id, id),
-    with: { business: true, fields: true },
-  });
-  if (!row) throw new ApiError(404, "TASK_NOT_FOUND", "Задача не найдена.");
-  return taskDto(row);
-}
-export async function getTask(id: string, session: WorkspaceSession) {
-  const task = await readTask(id);
-  if (session.role === "student" && task.status !== "published")
-    throw new ApiError(404, "TASK_NOT_FOUND", "Задача не найдена.");
-  return session.role === "student" ? publicTask(task) : task;
-}
-async function readProposal(
-  id: string,
-  reader: Reader = db,
-): Promise<Proposal> {
-  const row = await reader.query.proposals.findFirst({
-    where: eq(proposals.id, id),
-    with: { milestone: true },
-  });
-  if (!row) throw new ApiError(404, "PROPOSAL_NOT_FOUND", "Отклик не найден.");
-  return proposalDto(row);
-}
-async function lockProposal(tx: Transaction, id: string) {
-  const [row] = await tx
-    .select()
-    .from(proposals)
-    .where(eq(proposals.id, id))
-    .for("update");
-  if (!row) throw new ApiError(404, "PROPOSAL_NOT_FOUND", "Отклик не найден.");
-  return row;
-}
-function fieldRows(task: Task) {
-  return TASK_FIELDS.map(({ key }) => ({
-    taskId: task.id,
-    node: key,
-    value: task.fields[key],
-    state: !task.fields[key]
-      ? ("empty" as const)
-      : task.confirmedFields.includes(key)
-        ? ("confirmed" as const)
-        : ("suggested" as const),
-  }));
+
+export function requireRole(session: WorkspaceSession, role: WorkspaceSession["role"]) {
+  if (session.role !== role) throw new ApiError(403,"forbidden","Действие недоступно для текущей роли");
 }
 export async function getWorkspace(session: WorkspaceSession) {
-  // A single consistent snapshot prevents mixed task/field/proposal versions.
-  return db.transaction(
-    async (tx) => {
-      const taskRows = await tx.query.tasks.findMany({
-        where:
-          session.role === "student"
-            ? eq(tasks.status, "published")
-            : undefined,
-        with: { business: true, fields: true },
-        orderBy: [desc(tasks.createdAt), asc(tasks.id)],
-      });
-      const teamRows = await tx.query.teams.findMany({
-        orderBy: [asc(teams.createdAt), asc(teams.id)],
-      });
-      const visibleIds = taskRows.map((task) => task.id);
-      const proposalRows = visibleIds.length
-        ? await tx.query.proposals.findMany({
-            where: and(
-              inArray(proposals.taskId, visibleIds),
-              session.role === "student"
-                ? eq(proposals.teamId, session.teamId ?? "")
-                : undefined,
-            ),
-            with: { milestone: true },
-            orderBy: [asc(proposals.createdAt), asc(proposals.id)],
-          })
-        : [];
-      return {
-        tasks: taskRows
-          .map(taskDto)
-          .map((task) =>
-            session.role === "student" ? publicTask(task) : task,
-          ),
-        teams: teamRows.map(teamDto),
-        proposals: proposalRows.map(proposalDto),
-        session,
-        business: await readBusinessProfile(session.businessId, tx),
-      };
-    },
-    { isolationLevel: "repeatable read", accessMode: "read only" },
-  );
+  if (!session.onboardingCompleted) return { session, tasks: [], teams: await listTeams(), proposals: [], business: null };
+  const actor = await getDemoActor();
+  return db.transaction(async tx => {
+    const taskRows = await tx.select().from(tasks).orderBy(desc(tasks.createdAt),asc(tasks.id));
+    const fieldRows = await tx.select().from(taskFields);
+    const proposalRows = await tx.select().from(proposals);
+    const stageRows = await tx.select().from(stages);
+    const teamRows = await tx.select().from(teams).orderBy(asc(teams.createdAt),asc(teams.id));
+    const visible = taskRows.filter(t => taskAccess(actor,{...t,fields:[]},proposalRows));
+    return { session, business: await readBusinessProfile(session.businessId,tx), tasks: visible.map(t => taskDto(t,fieldRows.filter(f => f.taskId === t.id),actor.role === "business" && actor.businessId === t.businessId)), teams: teamRows.filter(t => isDemoTeamId(t.id)).map(teamDto), proposals: visibleProposals(actor,proposalRows,taskRows).map(p => proposalDto(p,stageRows)) };
+  }, { isolationLevel: "repeatable read", accessMode: "read only" });
+}
+export async function getTask(id: string, session: WorkspaceSession) {
+  const snapshot = await getWorkspace(session);
+  const task = snapshot.tasks.find(t => t.id === id);
+  if (!task) throw new ApiError(404,"TASK_NOT_FOUND","Задача не найдена");
+  return task;
 }
 export async function addTask(description: string, session: WorkspaceSession) {
-  requireRole(session, "business");
-  const task = createTask(description);
-  return db.transaction(async (tx) => {
-    const profile = session.businessId
-      ? await tx.query.businesses.findFirst({ where: eq(businesses.id, session.businessId) })
-      : null;
-    const businessId = profile?.id ?? crypto.randomUUID();
-    if (!profile) {
-      await tx.insert(businesses).values({
-        id: businessId, name: task.company, industry: task.industry,
-      });
-    }
-    await tx
-      .insert(tasks)
-      .values({
-        id: task.id,
-        businessId,
-        title: task.title,
-        description: task.description,
-      });
-    await tx.insert(taskFields).values(fieldRows(task));
-    await tx
-      .insert(scoreEvents)
-      .values({
-        id: crypto.randomUUID(),
-        taskId: task.id,
-        previousScore: null,
-        score: 0,
-        closedItems: [],
-      });
-    return readTask(task.id, tx);
-  });
+  requireRole(session,"business");
+  return (await createTask({description})).task;
 }
-export async function updateTask(
-  id: string,
-  input: TaskUpdate,
-  session: WorkspaceSession,
-) {
-  requireRole(session, "business");
-  if (input.version === undefined)
-    throw new ApiError(
-      422,
-      "VERSION_REQUIRED",
-      "Обновите карточку перед сохранением.",
-    );
-  if (input.id && input.id !== id)
-    throw new ApiError(
-      422,
-      "ID_MISMATCH",
-      "Идентификатор карточки не совпадает.",
-    );
-  if (input.status === "published") {
-    if (!input.fields.need && !input.fields.context)
-      throw new ApiError(
-        422,
-        "CONTEXT_REQUIRED",
-        "Опишите проблему или контекст перед публикацией.",
-      );
-    if (
-      TASK_FIELDS.some(
-        ({ key }) => input.fields[key] && !input.confirmedFields.includes(key),
-      )
-    )
-      throw new ApiError(
-        422,
-        "CONFIRMATION_REQUIRED",
-        "Подтвердите заполненные поля перед публикацией.",
-      );
-  }
-  return db.transaction(async (tx) => {
-    const [row] = await tx
-      .select()
-      .from(tasks)
-      .where(eq(tasks.id, id))
-      .for("update");
-    if (!row) throw new ApiError(404, "TASK_NOT_FOUND", "Задача не найдена.");
-    if (row.version !== input.version)
-      throw new ApiError(
-        409,
-        "STALE_TASK",
-        "Карточка уже изменена. Обновите данные и повторите сохранение.",
-      );
-    if (row.status === "published" && input.status === "draft")
-      throw new ApiError(
-        409,
-        "ALREADY_PUBLISHED",
-        "Опубликованную задачу нельзя перевести в черновик.",
-      );
-    const previous = await readTask(id, tx);
-    const next: Task = {
-      ...previous,
-      ...input,
-      id,
-      createdAt: previous.createdAt,
-    };
-    // Task-specific metadata edits must never rename the onboarding profile or
-    // other tasks that reference it. Detach only when those details change.
-    let businessId = row.businessId;
-    if (input.company !== previous.company || input.industry !== previous.industry) {
-      const sourceBusiness = await tx.query.businesses.findFirst({
-        where: eq(businesses.id, row.businessId),
-      });
-      businessId = crypto.randomUUID();
-      await tx.insert(businesses).values({
-        id: businessId,
-        name: input.company,
-        industry: input.industry,
-        logoKey: sourceBusiness?.logoKey ?? null,
-      });
+export async function updateTask(id: string, input: TaskUpdate, session: WorkspaceSession) {
+  requireRole(session,"business");
+  const actor = await getDemoActor();
+  if (input.version === undefined) throw new ApiError(422,"VERSION_REQUIRED","Обновите карточку перед сохранением");
+  if (input.id && input.id !== id) throw new ApiError(422,"ID_MISMATCH","Идентификатор карточки не совпадает");
+  await db.transaction(async tx => {
+    const [row] = await tx.select().from(tasks).where(eq(tasks.id,id)).for("update");
+    if (!row) throw new ApiError(404,"TASK_NOT_FOUND","Задача не найдена");
+    assertTaskOwner(actor,row);
+    if (row.version !== input.version) throw new ApiError(409,"STALE_TASK","Карточка уже изменена. Обновите данные");
+    if (row.status !== "draft" && input.status === "draft") throw new ApiError(409,"ALREADY_PUBLISHED","Опубликованную задачу нельзя вернуть в черновик");
+    const existing = await tx.select().from(taskFields).where(eq(taskFields.taskId,id));
+    const before = taskDto(row,existing,true);
+    for (const [group,keys] of Object.entries(FIELD_NODES) as [keyof Task["fields"],string[]][]) {
+      const value = input.fields[group];
+      const changed = value !== before.fields[group];
+      const confirmed = input.confirmedFields.includes(group);
+      if (changed && group === "success") throw new ApiError(422,"STRUCTURED_CRITERIA_REQUIRED","Критерии приёмки задаются отдельно: метрика, порог и способ проверки. Откройте подробную карточку");
+      const populated = existing.filter(f => keys.includes(f.node) && f.value.trim());
+      if (changed && populated.length > 1) throw new ApiError(422,"STRUCTURED_FIELDS_REQUIRED","В этом разделе несколько подтверждаемых полей. Измените их в подробной карточке");
+      if (confirmed && value.trim() && !populated.length && !changed) throw new ApiError(422,"STRUCTURED_FIELDS_REQUIRED","Исходные сведения нужно подтвердить по отдельным полям в подробной карточке");
+      if (changed) {
+        const node = populated[0]?.node ?? keys[0];
+        await tx.insert(taskFields).values({taskId:id,node,value,state:confirmed && value.trim() ? "confirmed":"suggested",source:"manual",sourceQuote:value,confirmedAt:confirmed && value.trim()?new Date():null}).onConflictDoUpdate({target:[taskFields.taskId,taskFields.node],set:{value,state:confirmed && value.trim()?"confirmed":"suggested",source:"manual",sourceQuote:value,sourceTurnId:null,confirmedAt:confirmed && value.trim()?new Date():null,updatedAt:new Date()}});
+      } else if (group !== "success") {
+        for (const field of populated) await tx.update(taskFields).set({state:confirmed?"confirmed":"suggested",confirmedAt:confirmed?new Date():null,updatedAt:new Date()}).where(and(eq(taskFields.taskId,id),eq(taskFields.node,field.node)));
+      }
     }
-    await tx
-      .update(tasks)
-      .set({
-        businessId,
-        title: input.title,
-        description: input.description,
-        status: input.status,
-        version: row.version + 1,
-        updatedAt: new Date(),
-        publishedAt:
-          input.status === "published" ? (row.publishedAt ?? new Date()) : null,
-      })
-      .where(eq(tasks.id, id));
-    for (const field of fieldRows(next)) {
-      await tx
-        .insert(taskFields)
-        .values(field)
-        .onConflictDoUpdate({
-          target: [taskFields.taskId, taskFields.node],
-          set: { value: field.value, state: field.state },
-        });
-    }
-    await tx
-      .insert(scoreEvents)
-      .values({
-        id: crypto.randomUUID(),
-        taskId: id,
-        previousScore: calculateScore(previous),
-        score: calculateScore(next),
-        closedItems: newlyConfirmedFields(previous, next),
-      });
-    return readTask(id, tx);
+    if (input.status === "published" && Object.entries(input.fields).some(([key,value]) => value.trim() && !input.confirmedFields.includes(key as keyof Task["fields"]))) throw new ApiError(422,"CONFIRMATION_REQUIRED","Подтвердите заполненные поля перед публикацией");
+    await tx.update(tasks).set({title:input.title,company:input.company,topic:input.industry,description:input.description,version:row.version+1,status:row.status === "draft"?input.status:row.status,publishedAt:input.status==="published"?(row.publishedAt??new Date()):row.publishedAt,updatedAt:new Date()}).where(eq(tasks.id,id));
+    await tx.update(grillSession).set({version:sql`${grillSession.version}+1`,...(input.status==="published"?{status:"finished" as const,currentNode:null,currentBlock:null}:{}),updatedAt:new Date()}).where(eq(grillSession.taskId,id));
+    await recalculateScore(tx,id,"task");
   });
+  return getTask(id,session);
 }
 export async function getScore(id: string, session: WorkspaceSession) {
-  return db.transaction(
-    async (tx) => {
-      const task = await readTask(id, tx);
-      if (session.role === "student" && task.status !== "published")
-        throw new ApiError(404, "TASK_NOT_FOUND", "Задача не найдена.");
-      const event = await tx.query.scoreEvents.findFirst({
-        where: eq(scoreEvents.taskId, id),
-        orderBy: [desc(scoreEvents.createdAt), desc(scoreEvents.id)],
-      });
-      return evaluateTask(task, event);
-    },
-    { isolationLevel: "repeatable read", accessMode: "read only" },
-  );
+  await getTask(id,session);
+  const actor = await getDemoActor();
+  const [row] = await db.select().from(tasks).where(eq(tasks.id,id));
+  if (!row) throw new ApiError(404,"TASK_NOT_FOUND","Задача не найдена");
+  assertTaskOwner(actor,row);
+  return canonicalScore(id);
 }
 export async function getScoreHistory(id: string, session: WorkspaceSession) {
-  requireRole(session, "business");
-  await getTask(id, session);
-  return db
-    .select()
-    .from(scoreEvents)
-    .where(eq(scoreEvents.taskId, id))
-    .orderBy(desc(scoreEvents.createdAt))
-    .limit(100);
+  await getScore(id,session);
+  return db.select().from(scoreEvent).where(eq(scoreEvent.taskId,id)).orderBy(desc(scoreEvent.at)).limit(100);
 }
-export async function saveTeam(
-  input: TeamInput,
-  session: WorkspaceSession,
-  updating = false,
-) {
-  requireRole(session, "student");
-  if (updating) {
-    requireTeam(session, input.id);
-    const [row] = await db
-      .update(teams)
-      .set({ ...input, updatedAt: new Date() })
-      .where(eq(teams.id, input.id))
-      .returning();
-    if (!row) throw new ApiError(404, "TEAM_NOT_FOUND", "Команда не найдена.");
-    return teamDto(row);
-  }
-  const [row] = await db.insert(teams).values(input).returning();
-  return teamDto(row);
+export async function saveTeam(input: TeamInput, session: WorkspaceSession, updating=false) {
+  requireRole(session,"student");
+  const actor=await getDemoActor();
+  if (actor.role!=="team" || actor.teamId!==input.id) throw new ApiError(403,"forbidden","Можно редактировать только свою демо-команду");
+  if (!updating) throw new ApiError(409,"DEMO_TEAM_EXISTS","Выберите существующую демо-команду и измените профиль");
+  const [saved]=await db.update(teams).set({...input,updatedAt:new Date()}).where(eq(teams.id,input.id)).returning();
+  if (!saved) throw new ApiError(404,"TEAM_NOT_FOUND","Команда не найдена");
+  return teamDto(saved);
 }
-export async function applyToTask(
-  taskId: string,
-  input: ProposalInput,
-  session: WorkspaceSession,
-) {
-  requireTeam(session, input.teamId);
-  return db.transaction(async (tx) => {
-    const [task] = await tx
-      .select()
-      .from(tasks)
-      .where(eq(tasks.id, taskId))
-      .for("share");
-    if (!task || task.status !== "published")
-      throw new ApiError(
-        404,
-        "TASK_NOT_FOUND",
-        "Опубликованная задача не найдена.",
-      );
-    const id = crypto.randomUUID();
-    await tx.insert(proposals).values({ ...input, id, taskId });
-    return readProposal(id, tx);
-  });
+async function readProposal(id:string) {
+  const actor=await getDemoActor();
+  const [row]=await db.select().from(proposals).where(eq(proposals.id,id));
+  if (!row) throw new ApiError(404,"PROPOSAL_NOT_FOUND","Отклик не найден");
+  const [task]=await db.select().from(tasks).where(eq(tasks.id,row.taskId));
+  if (!task || !visibleProposals(actor,[row],[task]).length) throw new ApiError(403,"forbidden","Нет доступа к отклику");
+  return proposalDto(row,await db.select().from(stages).where(eq(stages.proposalId,id)));
 }
-export async function listProposals(taskId: string, session: WorkspaceSession) {
-  await getTask(taskId, session);
-  const rows = await db.query.proposals.findMany({
-    where: and(
-      eq(proposals.taskId, taskId),
-      session.role === "student"
-        ? eq(proposals.teamId, session.teamId ?? "")
-        : undefined,
-    ),
-    with: { milestone: true },
-    orderBy: asc(proposals.createdAt),
-  });
-  return rows.map(proposalDto);
+export async function decideProposal(id:string,status:Proposal["status"],session:WorkspaceSession,note?:string) {
+  requireRole(session,"business");
+  if (status==="rejected" && !note?.trim()) throw new ApiError(422,"validation_error","Укажите причину отклонения");
+  await canonicalDecision(await getDemoActor(),id,status==="selected"?{action:"accept"}:status==="rejected"?{action:"reject",reason:"other",note:note!.trim()}:{action:"submitted"});
+  return readProposal(id);
 }
-export async function decideProposal(
-  id: string,
-  status: Proposal["status"],
-  session: WorkspaceSession,
-) {
-  requireRole(session, "business");
-  return db.transaction(async (tx) => {
-    await lockProposal(tx, id);
-    // Decisions can be undone; already confirmed results and earned points remain.
-    await tx
-      .update(proposals)
-      .set({ status, updatedAt: new Date() })
-      .where(eq(proposals.id, id));
-    return readProposal(id, tx);
-  });
+export async function submitResult(id:string,input:MilestoneInput,session:WorkspaceSession) {
+  requireRole(session,"student");
+  const actor=await getDemoActor();
+  const rows=await listProposalStages(actor,id);
+  const stage=rows.find(s=>s.status==="open"||s.status==="returned");
+  if (!stage) throw new ApiError(409,"NO_OPEN_STAGE","Нет открытого этапа. Откройте подробный список этапов");
+  await claimStage(actor,stage.id,{reportUrl:input.resultUrl,comment:input.comment});
+  return readProposal(id);
 }
-export async function submitResult(
-  id: string,
-  input: MilestoneInput,
-  session: WorkspaceSession,
-) {
-  requireRole(session, "student");
-  return db.transaction(async (tx) => {
-    const proposal = await lockProposal(tx, id);
-    requireTeam(session, proposal.teamId);
-    if (proposal.status !== "selected")
-      throw new ApiError(
-        409,
-        "NOT_SELECTED",
-        "Результат может отправить только выбранная команда.",
-      );
-    const current = await tx.query.milestones.findFirst({
-      where: eq(milestones.proposalId, id),
-    });
-    if (current?.status === "confirmed")
-      throw new ApiError(
-        409,
-        "ALREADY_CONFIRMED",
-        "Подтверждённый результат нельзя изменить.",
-      );
-    await tx
-      .insert(milestones)
-      .values({ ...input, id: crypto.randomUUID(), proposalId: id })
-      .onConflictDoUpdate({
-        target: milestones.proposalId,
-        set: { ...input, submittedAt: new Date() },
-      });
-    return readProposal(id, tx);
-  });
+export async function confirmResult(id:string,session:WorkspaceSession) {
+  requireRole(session,"business");
+  const actor=await getDemoActor();
+  const rows=await listProposalStages(actor,id);
+  const stage=rows.find(s=>s.status==="claimed");
+  if (!stage) throw new ApiError(409,"RESULT_REQUIRED","Нет этапа, сданного на проверку");
+  await confirmStage(actor,stage.id,{});
+  return readProposal(id);
 }
-export async function confirmResult(id: string, session: WorkspaceSession) {
-  requireRole(session, "business");
-  return db.transaction(async (tx) => {
-    const proposal = await lockProposal(tx, id);
-    const milestone = await tx.query.milestones.findFirst({
-      where: eq(milestones.proposalId, id),
-    });
-    if (milestone?.status === "confirmed") return readProposal(id, tx);
-    if (proposal.status !== "selected")
-      throw new ApiError(409, "NOT_SELECTED", "Сначала выберите команду.");
-    if (!milestone)
-      throw new ApiError(
-        409,
-        "RESULT_REQUIRED",
-        "Команда ещё не отправила результат этапа.",
-      );
-    await tx
-      .update(milestones)
-      .set({ status: "confirmed", confirmedAt: new Date() })
-      .where(eq(milestones.id, milestone.id));
-    return readProposal(id, tx);
-  });
+export async function getProgress(teamId:string,session:WorkspaceSession) {
+  requireRole(session,"student");
+  const actor=await getDemoActor();
+  if (actor.role!=="team"||actor.teamId!==teamId) throw new ApiError(403,"forbidden","Нет доступа к другой команде");
+  return getTeamProgress(teamId);
 }
-export async function getProgress(teamId: string, session: WorkspaceSession) {
-  if (session.role === "student") requireTeam(session, teamId);
-  await validateSessionTeam(teamId);
-  const rows = await db
-    .select({
-      milestoneId: milestones.id,
-      proposalId: proposals.id,
-      taskId: proposals.taskId,
-      title: milestones.title,
-      resultUrl: milestones.resultUrl,
-      comment: milestones.comment,
-      confirmedAt: milestones.confirmedAt,
-    })
-    .from(milestones)
-    .innerJoin(proposals, eq(milestones.proposalId, proposals.id))
-    .where(
-      and(eq(proposals.teamId, teamId), eq(milestones.status, "confirmed")),
-    );
-  return { points: rows.length * 10, confirmedMilestones: rows };
-}
-export async function getKickoff(id: string, session: WorkspaceSession) {
-  const proposal = await readProposal(id);
-  if (session.role === "student") requireTeam(session, proposal.teamId);
-  if (proposal.status !== "selected")
-    throw new ApiError(
-      409,
-      "NOT_SELECTED",
-      "Стартовый пакет доступен после выбора команды.",
-    );
-  const task = publicTask(await readTask(proposal.taskId));
-  return {
-    taskId: task.id,
-    proposalId: id,
-    materials: task.fields.data,
-    constraints: task.fields.constraints,
-    contact: task.fields.contact,
-    interaction: task.fields.interaction,
-    firstMilestone: task.fields.success || task.fields.outcome,
-  };
+export async function getKickoff(id:string,_session:WorkspaceSession) {
+  return canonicalKickoff(await getDemoActor(),id);
 }

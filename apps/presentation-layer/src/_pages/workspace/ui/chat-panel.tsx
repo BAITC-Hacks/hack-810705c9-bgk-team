@@ -233,7 +233,7 @@ export function ChatPanel({
                     </DialogHeader>
                     <details className="space-y-3 rounded-lg border p-3">
                       <summary className="cursor-pointer text-sm font-semibold">Технические сведения</summary>
-                      <p className="text-xs leading-relaxed text-muted-foreground">Уточняющие вопросы и навыки используют локальные шаблоны. Свободные сообщения отправляются подключённому помощнику.</p>
+                      <p className="text-xs leading-relaxed text-muted-foreground">Уточняющие вопросы и навыки используют локальные шаблоны. Свободные сообщения отправляются через сервер настроенному помощнику; если он недоступен, поле показывает ошибку и сохраняет ваш ввод.</p>
                     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted p-3">
                       <p role="status" className="text-sm font-medium">
                         {displayedAnalysis.fallbackUsed ? "Ошибка обработана · использованы безопасные вопросы" : "Ответ проверен · шаблон выполнен"}
@@ -250,7 +250,7 @@ export function ChatPanel({
                     <AiContractDetails label="Исходный ответ · JSON" value={displayedAnalysis.rawOutput} />
                     <AiContractDetails label="Проверенный результат и статус" value={JSON.stringify({ output: displayedAnalysis.output, parse_ok: displayedAnalysis.parseOk, fallback_used: displayedAnalysis.fallbackUsed }, null, 2)} />
                     <p className="text-xs leading-relaxed text-muted-foreground">
-                      При неверном JSON, неизвестных полях или повторных вопросах ответ заменяется локальным шаблоном. Заполненные поля ждут подтверждения человека, а рейтинг и выбор команд остаются в интерфейсе.
+                      При неверном JSON, неизвестных полях или повторных вопросах ответ заменяется локальным шаблоном. Заполненные поля ждут подтверждения человека, а рейтинг пересчитывается сервером после подтверждения полей.
                     </p>
                     </details>
                   </DialogContent>
@@ -265,6 +265,15 @@ export function ChatPanel({
                       ? "Карточка заполнена и подтверждена. Осталось опубликовать задачу для студентов."
                       : "Всё важное уже в карточке. Можно перейти к предложениям команд или уточнить детали задачи."}
               </p>
+              <div className="mt-4 rounded-lg border p-3">
+                <p className="mb-2 text-xs leading-relaxed text-muted-foreground">
+                  Здесь доступны локальные подсказки и диктовка. Прожарка с сохранением сессии,
+                  подтверждением полей и критериев открывается отдельно.
+                </p>
+                <Button asChild size="sm" variant="outline">
+                  <a href={`/task-match?task=${encodeURIComponent(task.id)}`}>Открыть прожарку и критерии</a>
+                </Button>
+              </div>
               {questions.length > 0 && (
                 <>
                   <div className="mt-4 space-y-2">

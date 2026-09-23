@@ -102,7 +102,7 @@ export function TeamPicker({
 }: TeamPickerProps) {
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState(activeTeamId);
-  const [mode, setMode] = useState<"browse" | "create" | "edit">("browse");
+  const [mode, setMode] = useState<"browse" | "edit">("browse");
   const [draft, setDraft] = useState<TeamDraft>(EMPTY_DRAFT);
   const [error, setError] = useState("");
   const { pending, error: saveError, run } = useAsyncAction();
@@ -147,13 +147,10 @@ export function TeamPicker({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  function startForm(nextMode: "create" | "edit") {
-    setDraft(
-      nextMode === "edit" && activeTeam
-        ? draftFromTeam(activeTeam)
-        : EMPTY_DRAFT,
-    );
-    setMode(nextMode);
+  function startForm() {
+    if (!activeTeam) return;
+    setDraft(draftFromTeam(activeTeam));
+    setMode("edit");
     setError("");
   }
 
@@ -188,8 +185,9 @@ export function TeamPicker({
       return;
     }
 
+    if (!activeTeam) return;
     const team: Team = {
-      id: mode === "edit" && activeTeam ? activeTeam.id : crypto.randomUUID(),
+      id: activeTeam.id,
       name,
       initials: teamInitials(name),
       tagline: draft.tagline.trim(),
@@ -244,11 +242,7 @@ export function TeamPicker({
       >
         <DialogHeader className="gap-2 pr-6">
           <DialogTitle className="text-xl font-bold tracking-tight">
-            {mode === "create"
-              ? "Новая команда"
-              : mode === "edit"
-                ? "Профиль команды"
-                : "Моя команда"}
+            {mode === "edit" ? "Профиль команды" : "Моя команда"}
           </DialogTitle>
           <DialogDescription>
             {mode === "browse"
@@ -320,7 +314,7 @@ export function TeamPicker({
                       <Button
                         variant="outline"
                         className="h-10 font-semibold"
-                        onClick={() => startForm("edit")}
+                        onClick={startForm}
                       >
                         Изменить профиль
                       </Button>
@@ -339,18 +333,11 @@ export function TeamPicker({
                 </div>
               ) : (
                 <p className="py-4 text-sm text-muted-foreground">
-                  Создайте команду, чтобы отправлять отклики.
+                  Для отклика выберите доступную демо-команду.
                 </p>
               )}
             </div>
             <div className="flex items-center justify-between border-t pt-4">
-              <Button
-                variant="ghost"
-                className="-ml-2 font-semibold"
-                onClick={() => startForm("create")}
-              >
-                Создать команду
-              </Button>
               <Button variant="outline" className="font-semibold" onClick={() => setOpen(false)}>
                 Готово
               </Button>
@@ -474,9 +461,7 @@ export function TeamPicker({
                 Отмена
               </Button>
               <Button type="submit" className="font-semibold">
-                {mode === "create"
-                  ? "Создать и выбрать"
-                  : "Сохранить изменения"}
+                Сохранить изменения
               </Button>
             </div>
             </fieldset>

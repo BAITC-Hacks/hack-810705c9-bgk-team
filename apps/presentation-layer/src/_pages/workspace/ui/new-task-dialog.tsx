@@ -38,7 +38,7 @@ export function NewTaskDialog({
           className="mt-2 space-y-4"
           onSubmit={async (event) => {
             event.preventDefault();
-            if (description.trim().length < 10) return;
+            if (description.trim().length < 20) return;
             if (!await run(() => onCreate(description.trim()))) return;
             setDescription("");
             onOpenChange(false);
@@ -55,8 +55,8 @@ export function NewTaskDialog({
             placeholder="Например, каждый вечер в нашей пекарне остаётся непроданная выпечка. Хотим понять, сколько готовить…"
             className="min-h-36 resize-none bg-muted/40 p-3 text-sm leading-relaxed"
             required
-            minLength={10}
-            maxLength={4000}
+            minLength={20}
+            maxLength={2000}
           />
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <div className="flex items-center justify-between gap-3">
@@ -65,7 +65,7 @@ export function NewTaskDialog({
             </span>
             <Button
               type="submit"
-              disabled={pending || description.trim().length < 10}
+              disabled={pending || description.trim().length < 20}
               className="h-9"
             >
               {pending ? "Создаём…" : "Создать черновик"}

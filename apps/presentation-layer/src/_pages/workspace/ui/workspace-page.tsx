@@ -237,10 +237,9 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
   const taskDocuments = useTaskDocuments(task.id);
   const conversationKey = task.id;
   const messages = conversations[conversationKey] ?? [];
-  const points =
-    data.proposals.filter(
-      (proposal) => proposal.teamId === teamId && proposal.milestoneConfirmed,
-    ).length * 10;
+  const points = data.proposals
+    .filter((proposal) => proposal.teamId === teamId)
+    .reduce((sum, proposal) => sum + (proposal.points ?? (proposal.milestoneConfirmed ? 10 : 0)), 0);
 
   async function changeRole(next: Role) {
     if (next === role || switching) return;
@@ -319,6 +318,10 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
   }
 
   function openCard() {
+    if (task.canEdit === false) {
+      toast.error("Изменять карточку может только её бизнес-владелец. Выберите свою задачу.");
+      return;
+    }
     editorReturnFocus.current =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
@@ -430,6 +433,10 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
   }
 
   async function saveTask(input: Task) {
+    if (task.canEdit === false) {
+      toast.error("Изменять карточку может только её бизнес-владелец. Выберите свою задачу.");
+      return;
+    }
     const next = await workspaceApi.saveTask(input);
     editorDrafts.delete(next.id);
     setData((current) => ({
@@ -457,6 +464,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
     if (skill) {
       response = runChatSkill(task, data.proposals, data.teams, skill, text);
     } else if (field) {
+      if (task.canEdit === false) throw new Error("Изменять карточку может только её бизнес-владелец.");
       const label = TASK_FIELDS.find((item) => item.key === field)?.label;
       const update = (item: Task): Task => ({
         ...item,
@@ -636,10 +644,11 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
       teams={data.teams}
       proposals={data.proposals}
       activeTeamId={teamId}
+      canUndoDecision={false}
       onEditTask={openCard}
       onClose={toggleProposals}
-      onDecision={async (id, decision) => {
-        const saved = await workspaceApi.decide(id, decision);
+      onDecision={async (id, decision, reason) => {
+        const saved = await workspaceApi.decide(id, decision, reason);
         setData((current) => ({
           ...current,
           proposals: current.proposals.map((proposal) =>
@@ -659,16 +668,6 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
                 : "Отклик остаётся в списке.",
           },
         );
-      }}
-      onApply={async (input) => {
-        const proposal = await workspaceApi.apply(task.id, { ...input, teamId });
-        setData((current) => ({
-          ...current,
-          proposals: [...current.proposals, proposal],
-        }));
-        toast.success("Предложение отправлено", {
-          description: "Переключитесь в роль бизнеса, чтобы увидеть отклик.",
-        });
       }}
       onSubmitMilestone={async (id, submission) => {
         const proposal = await workspaceApi.submitMilestone(id, submission);

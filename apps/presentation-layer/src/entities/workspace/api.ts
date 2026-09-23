@@ -34,13 +34,11 @@ export const workspaceApi = {
   teams: () => request<Team[]>("/teams"),
   onboard: (input: OnboardingInput) => request<WorkspaceSession>("/onboarding", "POST", input),
   session: (session: Partial<WorkspaceSession>) => request<WorkspaceSession>("/session", "PATCH", session),
-  createTask: (description: string) => request<Task>("/tasks", "POST", { description }),
+  createTask: (description: string) => request<Task>("/workspace/tasks", "POST", { description }),
   saveTask: ({ id, title, company, industry, description, fields, confirmedFields, status, version }: Task) =>
-    request<Task>(`/tasks/${key(id)}`, "PATCH", { title, company, industry, description, fields, confirmedFields, status, version }),
+    request<Task>(`/workspace/tasks/${key(id)}`, "PATCH", { title, company, industry, description, fields, confirmedFields, status, version }),
   saveTeam: (team: Team, exists: boolean) => request<Team>(exists ? `/teams/${key(team.id)}` : "/teams", exists ? "PATCH" : "POST", team),
-  apply: (taskId: string, input: Pick<Proposal, "teamId" | "idea" | "plan" | "timeline" | "prototypeUrl">) =>
-    request<Proposal>(`/tasks/${key(taskId)}/proposals`, "POST", input),
-  decide: (id: string, status: Proposal["status"]) => request<Proposal>(`/proposals/${key(id)}/decision`, "POST", { status }),
-  submitMilestone: (id: string, input: MilestoneSubmission) => request<Proposal>(`/proposals/${key(id)}/milestone`, "PUT", input),
-  confirmMilestone: (id: string) => request<Proposal>(`/proposals/${key(id)}/milestone/confirm`, "POST", {}),
+  decide: (id: string, status: Proposal["status"], note?: string) => request<Proposal>(`/workspace/proposals/${key(id)}/decision`, "POST", { status, note }),
+  submitMilestone: (id: string, input: MilestoneSubmission) => request<Proposal>(`/workspace/proposals/${key(id)}/milestone`, "PUT", input),
+  confirmMilestone: (id: string) => request<Proposal>(`/workspace/proposals/${key(id)}/milestone/confirm`, "POST", {}),
 };

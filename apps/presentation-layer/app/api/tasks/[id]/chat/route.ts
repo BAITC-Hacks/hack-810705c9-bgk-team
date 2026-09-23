@@ -1,3 +1,4 @@
+import { requireTaskOwner } from "@/features/task-card/api/access";
 import { chatRequestSchema } from "@/entities/workspace/chat-contracts";
 import { idSchema } from "@/entities/workspace/contracts";
 import { generateChatReply } from "@/server/workspace/chat";
@@ -11,5 +12,6 @@ export const POST = apiRoute(async (request, context, session) => {
   const id = idSchema.parse((await context.params).id);
   const { messages } = await jsonBody(request, chatRequestSchema);
   await getTask(id, session);
+  await requireTaskOwner(id);
   return generateChatReply(messages, request.signal);
 });

@@ -43,8 +43,8 @@ export const taskCreateSchema = z
     description: z
       .string()
       .trim()
-      .min(10, "Опишите задачу: не менее 10 символов.")
-      .max(4000),
+      .min(20, "Опишите задачу: не менее 20 символов.")
+      .max(2000),
   })
   .strict();
 export const taskUpdateSchema = z
@@ -124,7 +124,7 @@ export const proposalInputSchema = z
   })
   .strict();
 export const decisionSchema = z
-  .object({ status: z.enum(["pending", "selected", "rejected"]) })
+  .object({ status: z.enum(["pending", "selected", "rejected"]), note: z.string().trim().max(5000).optional() })
   .strict();
 export const milestoneInputSchema = z
   .object({
