@@ -1,16 +1,11 @@
-import type { NextRequest } from 'next/server';
+import { recordSwipe } from '@/features/swipe';
+import { swipeRequestSchema, swipeResponseSchema } from '@/shared/api/contracts/task-match';
+import { withApi, readJson } from '@/shared/api/errors';
+import { jsonOk } from '@/shared/api/handler';
 
-import { createSwipeRequestSchema, createSwipeResponseSchema } from '@/shared/api/contracts/swipes';
-import { getDemoActor } from '@/shared/api/demo-actor';
-import { jsonOk, parseBody, readJsonBody, withErrorHandling } from '@/shared/api/handler';
-import { createSwipe } from '@/features/swipes/api/create-swipe';
-
-/** POST /api/swipes — раздел 10, ADR-006 §4 (FR-5.6, FR-5.8). */
-export async function POST(request: NextRequest) {
-  return withErrorHandling(async () => {
-    const actor = await getDemoActor(request);
-    const body = parseBody(createSwipeRequestSchema, await readJsonBody(request));
-    const result = await createSwipe(actor, body);
-    return jsonOk(createSwipeResponseSchema, result, { status: 201 });
-  });
-}
+export const dynamic = 'force-dynamic';
+export const POST = withApi(async (request: Request) => {
+  const input = swipeRequestSchema.parse(await readJson(request));
+  const result = await recordSwipe(input);
+  return jsonOk(result, swipeResponseSchema, result.created ? 201 : 200);
+});

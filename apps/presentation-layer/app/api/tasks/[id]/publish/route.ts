@@ -1,20 +1,12 @@
-import type { NextRequest } from 'next/server';
-
-import { idParamSchema } from '@/shared/api/contracts/common';
+import { getDemoActor } from '@/shared/api/actor';
+import { withApi } from '@/shared/api/errors';
+import { resourceIdSchema } from '@/shared/api/contracts/resource-id';
+import { jsonOk } from '@/shared/api/handler';
 import { publishTaskResponseSchema } from '@/shared/api/contracts/tasks';
-import { getDemoActor } from '@/shared/api/demo-actor';
-import { jsonOk, parseParams, withErrorHandling } from '@/shared/api/handler';
-import { publishTask } from '@/features/tasks/api/publish-task';
+import { publishTask } from '@/features/task-match/api/tasks';
 
-/** POST /api/tasks/:id/publish — раздел 10, FR-4.1/FR-4.2. */
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  return withErrorHandling(async () => {
-    const actor = await getDemoActor(request);
-    const { id } = await parseParams(idParamSchema, params);
-    const result = await publishTask(actor, id);
-    return jsonOk(publishTaskResponseSchema, result);
-  });
-}
+export const POST = withApi(async (_request: Request, { params }: { params: Promise<{ id: string }> }) => {
+  await getDemoActor();
+  const id = resourceIdSchema.parse((await params).id);
+  return jsonOk(await publishTask(id), publishTaskResponseSchema);
+});

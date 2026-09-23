@@ -1,94 +1,71 @@
-import { z } from 'zod';
+import { z } from "zod";
 
-import {
-  optionalUrlSchema,
-  proposalStatusSchema,
-  rejectReasonSchema,
-  storedRejectReasonSchema,
-} from './common';
+// ADR-007 / ADR-009: общие схемы откликов, решений и этапов.
 
-/** FR-6.1/FR-6.2: идея, план, роли, срок обязательны; ссылка опциональна. */
-export const submitProposalRequestSchema = z.object({
-  teamId: z.string().min(1),
-  solution: z.string().trim().min(1, 'Опишите идею решения.'),
-  plan: z.string().trim().min(1, 'Опишите план.'),
-  teamRoles: z.array(z.string()).min(1, 'Укажите роли в команде.'),
-  deadline: z.string().min(1, 'Укажите срок.'),
+import { optionalUrlSchema, rejectReasonSchema } from "./common";
+
+export const proposalInput = z.object({
+  solution: z.string().trim().min(1, "Опишите идею решения"),
+  plan: z.string().trim().min(1, "Опишите план"),
+  teamRoles: z.array(z.string().trim().min(1)).min(1, "Укажите роли в команде"),
+  deadline: z.string().trim().min(1, "Укажите срок"),
   repoUrl: optionalUrlSchema,
-  criteriaAnswers: z.array(
-    z.object({ criterionId: z.string(), howWeWillCheck: z.string().min(1) }),
-  ),
+  // criterion.id → «как проверим»; ключи сверяются с критериями задачи в use-case.
+  criteriaAnswers: z.record(z.string(), z.string().trim().min(1, "Заполните «как проверим»")),
 });
-export type SubmitProposalRequest = z.infer<typeof submitProposalRequestSchema>;
+export type ProposalInput = z.infer<typeof proposalInput>;
 
-export const proposalSchema = z.object({
-  id: z.string(),
-  taskId: z.string(),
-  teamId: z.string(),
-  solution: z.string(),
-  plan: z.string(),
-  teamRoles: z.array(z.string()),
-  deadline: z.string(),
-  repoUrl: z.string().optional(),
-  criteriaAnswers: z.array(
-    z.object({ criterionId: z.string(), howWeWillCheck: z.string() }),
-  ),
-  fit: z.number().min(0).max(1),
-  status: proposalStatusSchema,
-  rejectReason: storedRejectReasonSchema.optional(),
-  rejectNote: z.string().optional(),
-  decidedAt: z.string().optional(),
-  partialMatch: z.boolean(),
-});
-export type ApiProposal = z.infer<typeof proposalSchema>;
+export const USER_REJECT_REASONS = rejectReasonSchema.options;
 
-export const submitProposalResponseSchema = z.object({ proposal: proposalSchema });
-export type SubmitProposalResponse = z.infer<typeof submitProposalResponseSchema>;
-
-export const listProposalsResponseSchema = z.object({
-  proposals: z.array(proposalSchema),
-  comparison: z.array(
-    z.object({
-      criterionId: z.string(),
-      metric: z.string(),
-      byTeam: z.record(z.string(), z.string()),
-    }),
-  ),
-});
-export type ListProposalsResponse = z.infer<typeof listProposalsResponseSchema>;
-
-/**
- * FR-7.5: отклонение требует причину из enum, для 'other' обязателен текст.
- * `resume` — ADR-007 §3: «on_hold ↔ submitted разрешено в обе стороны»;
- * `hold` идёт submitted → on_hold, `resume` — обратно.
- */
-export const decisionRequestSchema = z
-  .discriminatedUnion('action', [
-    z.object({ action: z.literal('accept') }),
-    z.object({ action: z.literal('hold') }),
-    z.object({ action: z.literal('resume') }),
-    z.object({
-      action: z.literal('reject'),
+export const decisionInput = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("accept") }),
+  z.object({ action: z.literal("on_hold") }),
+  z.object({ action: z.literal("submitted") }),
+  z
+    .object({
+      action: z.literal("reject"),
       reason: rejectReasonSchema,
-      note: z.string().optional(),
+      note: z.string().trim().optional(),
+    })
+    .refine((v) => v.reason !== "other" || (v.note?.length ?? 0) > 0, {
+      message: "Для причины «другое» нужен текст",
+      path: ["note"],
     }),
-  ])
-  .refine((value) => value.action !== 'reject' || value.reason !== 'other' || !!value.note?.trim(), {
-    message: 'Для причины «другое» нужно указать текст.',
-    path: ['note'],
-  });
-export type DecisionRequest = z.infer<typeof decisionRequestSchema>;
+]);
+export type DecisionInput = z.infer<typeof decisionInput>;
 
-export const decisionResponseSchema = z.object({ proposal: proposalSchema });
-export type DecisionResponse = z.infer<typeof decisionResponseSchema>;
 
-export const kickoffResponseSchema = z.object({
-  proposalId: z.string(),
-  materials: z.array(z.string()),
-  stack: z.array(z.string()),
-  consultations: z.string().optional(),
-  deadline: z.string(),
-  paymentOrPracticeNote: z.string(),
-  firstStage: z.object({ criterionId: z.string(), metric: z.string(), howToCheck: z.string() }).nullable(),
+export { claimStageRequestSchema as stageClaimInput, returnStageRequestSchema as stageReturnInput, confirmStageRequestSchema as stageConfirmInput } from './stages';
+import { stageSchema } from './stages';
+import { dateTimeSchema, proposalStatusSchema, storedRejectReasonSchema } from './common';
+export const submitProposalRequestSchema = proposalInput;
+export type SubmitProposalRequest = ProposalInput;
+export const decisionRequestSchema = decisionInput;
+export type DecisionRequest = DecisionInput;
+export const criteriaAnswersSnapshotSchema = z.object({ criteriaVersion:z.number().int(), answers:z.record(z.string(),z.string()) });
+export const kickoffSchema = z.object({
+  items:z.array(z.object({key:z.string(),label:z.string(),value:z.string()})),
+  firstStage:z.object({criterionId:z.string(),metric:z.string(),threshold:z.string()}).nullable(),
+  contact:z.string().nullable(), builtAt:dateTimeSchema,
 });
-export type KickoffResponse = z.infer<typeof kickoffResponseSchema>;
+export const proposalSchema = z.object({
+  id:z.string(),taskId:z.string(),teamId:z.string(),solution:z.string(),plan:z.string(),teamRoles:z.array(z.string()),deadline:z.string(),
+  repoUrl:z.string().nullable(),criteriaAnswers:criteriaAnswersSnapshotSchema,fit:z.number().min(0).max(1),status:proposalStatusSchema,
+  rejectReason:storedRejectReasonSchema.nullable(),rejectNote:z.string().nullable(),decidedAt:dateTimeSchema.nullable(),
+  acceptedAt:dateTimeSchema.nullable(),kickoff:kickoffSchema.nullable(),createdAt:dateTimeSchema,updatedAt:dateTimeSchema,
+});
+export type ApiProposal=z.infer<typeof proposalSchema>;
+export const submitProposalResponseSchema=proposalSchema;
+export type SubmitProposalResponse=ApiProposal;
+export const decisionResponseSchema=z.object({proposal:proposalSchema,stages:z.array(stageSchema).optional()});
+export type DecisionResponse=z.infer<typeof decisionResponseSchema>;
+const comparisonCriterionSchema=z.object({id:z.string(),metric:z.string(),threshold:z.string()});
+export const listProposalsResponseSchema=z.object({
+  items:z.array(proposalSchema.pick({id:true,teamId:true,fit:true,createdAt:true,status:true,criteriaAnswers:true}).extend({teamName:z.string(),partialMatch:z.boolean(),versionMismatch:z.boolean()})),
+  matrix:z.object({criteria:z.array(comparisonCriterionSchema),rows:z.array(z.object({criterionId:z.string(),cells:z.array(z.object({proposalId:z.string(),answer:z.string().nullable(),versionMismatch:z.boolean()}))}))}),
+});
+export type ListProposalsResponse=z.infer<typeof listProposalsResponseSchema>;
+export const kickoffResponseSchema=z.object({kickoff:kickoffSchema.nullable(),stages:z.array(stageSchema),taskTitle:z.string(),teamName:z.string()});
+export type KickoffResponse=z.infer<typeof kickoffResponseSchema>;
+
+export const listTaskProposalsResponseSchema=listProposalsResponseSchema;

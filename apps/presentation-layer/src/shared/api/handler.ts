@@ -1,78 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { z } from 'zod';
+import { ApiError, readJson, toErrorResponse } from './errors';
 
-import { ApiErrorBody, invalidJson, toErrorResponse } from './errors';
-
-/**
- * ADR-009 §1: каждый route.ts делает три шага — getDemoActor(), парсинг по
- * схеме, вызов use-case — и не содержит бизнес-логики. Эти хелперы держат
- * route-файлы маленькими и однообразными.
- */
-
-/** Парсит JSON тело запроса; невалидный JSON -> 400 (не ZodError). */
-export async function readJsonBody(request: NextRequest): Promise<unknown> {
-  try {
-    return await request.json();
-  } catch (cause) {
-    throw invalidJson({ message: (cause as Error)?.message });
-  }
-}
-
-export function parseBody<TSchema extends z.ZodType>(
-  schema: TSchema,
-  body: unknown,
-): z.infer<TSchema> {
+/** ADR-009 parsing helpers; body limits and errors are shared with workspace. */
+export const readJsonBody = readJson;
+export function parseBody<T extends z.ZodType>(schema: T, body: unknown): z.infer<T> {
   return schema.parse(body);
 }
-
-export function parseQuery<TSchema extends z.ZodType>(
-  schema: TSchema,
-  request: NextRequest,
-): z.infer<TSchema> {
-  const params = Object.fromEntries(request.nextUrl.searchParams.entries());
-  return schema.parse(params);
+export function parseQuery<T extends z.ZodType>(schema: T, request: NextRequest): z.infer<T> {
+  return schema.parse(Object.fromEntries(request.nextUrl.searchParams.entries()));
 }
-
-/**
- * Next.js 16: `params` в route handler — Promise. Разворачивает и проверяет
- * схемой zod.
+export async function parseParams<T extends z.ZodType>(schema: T, params: Promise<Record<string, string | string[]>>): Promise<z.infer<T>> {
+  return schema.parse(await params);
+}
+/** Compatibility for callers already inside a request/Origin wrapper. */
+export async function withErrorHandling<T>(fn: () => Promise<NextResponse<T>>) {
+  try { return await fn(); } catch(error) { return toErrorResponse(error); }
+}
+/** Validate the actual JSON view (Date values become ISO strings).
+ * Schema failures are server errors, never input 422s; validation must not
+ * silently remove fields relied upon by an existing canonical client.
  */
-export async function parseParams<TSchema extends z.ZodType>(
-  schema: TSchema,
-  params: Promise<Record<string, string | string[]>>,
-): Promise<z.infer<TSchema>> {
-  const resolved = await params;
-  return schema.parse(resolved);
-}
-
-/**
- * Оборачивает тело route handler: ловит ApiError/ZodError/неизвестную ошибку
- * и превращает её в единый формат ответа (ADR-009 §4).
- */
-export async function withErrorHandling<T>(
-  fn: () => Promise<NextResponse<T>>,
-): Promise<NextResponse<T> | NextResponse<ApiErrorBody>> {
-  try {
-    return await fn();
-  } catch (error) {
-    return toErrorResponse(error);
-  }
-}
-
-export function jsonOk<TSchema extends z.ZodType>(
-  schema: TSchema,
-  data: z.infer<TSchema>,
-  init?: { status?: number },
-): NextResponse<z.infer<TSchema>> {
-  // Валидируем форму ответа схемой — контракт остаётся источником истины и
-  // для запроса, и для ответа (ADR-009 §3). Несоответствие здесь — баг
-  // use-case/маппинга, а не ввод клиента, поэтому не должно превращаться в
-  // 422 через общий ZodError-путь `toErrorResponse`: заворачиваем в обычный
-  // `Error`, который уйдёт по ветке "неизвестная ошибка" -> 500, залогируется
-  // и не раскроет клиенту внутренние детали схемы.
-  const result = schema.safeParse(data);
-  if (!result.success) {
-    throw new Error(`Response failed schema validation: ${result.error.message}`);
-  }
-  return NextResponse.json(result.data, { status: init?.status ?? 200 });
+export function jsonOk<T extends z.ZodType>(data: unknown, schema: T, status = 200): NextResponse {
+  let wire: unknown;
+  try { wire = JSON.parse(JSON.stringify(data)); }
+  catch { throw new ApiError(500, 'invalid_response', 'Ошибка формирования ответа сервера'); }
+  if (!schema.safeParse(wire).success) throw new ApiError(500, 'invalid_response', 'Ошибка формирования ответа сервера');
+  return NextResponse.json(wire, { status, headers: { 'Cache-Control': 'no-store' } });
 }

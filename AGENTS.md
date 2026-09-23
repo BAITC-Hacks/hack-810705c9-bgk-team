@@ -17,6 +17,7 @@ Build a working hackathon demo within five hours. Implement the requested user f
 - Commands: `./start.sh` for local dev; `./doctor.sh` for prerequisites; `bun run check-types` for types. App scripts live in their package.json.
 
 ## Working context
+- Memory bank rules: follow [memory-bank.md](./memory-bank.md); its core files live in [memory-bank/](./memory-bank/). Read them at the start of a task and update them after significant changes.
 - Product requirements and acceptance scenarios: [MVP «Мэтч задач» specification](docs/TASK_MATCH_MVP_SPEC.md). Product flows, AI prompts and contracts: [platform description](docs/TASK_MATCH_PLATFORM.md), especially section 8 for AI work. Source content is preserved with the cross-document link adjusted. SQLite/LibSQL, pnpm and single-app layouts in these documents do not replace the canonical stack above.
 - Read the files relevant to the task, not the entire repository. Search `apps/` and `packages/` first.
 - For task-specific guidance, use [hackathon-guide](.agents/skills/hackathon-guide/SKILL.md) ([Claude Code copy](.claude/skills/hackathon-guide/SKILL.md)). Its table maps tasks to a reference and the owning project module. Routine edits do not require library reading.

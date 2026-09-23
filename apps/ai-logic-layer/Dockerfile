@@ -22,5 +22,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=builder /app/apps/ai-logic-layer/.mastra/output ./output
 COPY --from=builder /app/apps/ai-logic-layer/package.json ./package.json
+# Единая папка скиллов (Mastra LocalSkillSource: skills/<name>/SKILL.md)
+COPY --from=builder /app/apps/ai-logic-layer/skills ./skills
 EXPOSE 4111
 CMD ["bun", "run", "output/index.mjs"]

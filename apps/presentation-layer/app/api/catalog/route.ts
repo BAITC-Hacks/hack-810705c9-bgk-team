@@ -1,14 +1,10 @@
-import type { NextRequest } from 'next/server';
-
-import { catalogQuerySchema, catalogResponseSchema } from '@/shared/api/contracts/catalog';
-import { jsonOk, parseQuery, withErrorHandling } from '@/shared/api/handler';
 import { getCatalog } from '@/features/catalog/api/get-catalog';
+import { catalogQuerySchema, catalogResponseSchema } from '@/shared/api/contracts/task-match';
+import { withApi } from '@/shared/api/errors';
+import { jsonOk } from '@/shared/api/handler';
 
-/** GET /api/catalog?topic=&level=&role=&format= — раздел 10, ADR-006 §5. */
-export async function GET(request: NextRequest) {
-  return withErrorHandling(async () => {
-    const query = parseQuery(catalogQuerySchema, request);
-    const result = getCatalog(query);
-    return jsonOk(catalogResponseSchema, result);
-  });
-}
+export const dynamic = 'force-dynamic';
+export const GET = withApi(async (request: Request) => {
+  const query = catalogQuerySchema.parse(Object.fromEntries(new URL(request.url).searchParams));
+  return jsonOk(await getCatalog(query), catalogResponseSchema);
+});

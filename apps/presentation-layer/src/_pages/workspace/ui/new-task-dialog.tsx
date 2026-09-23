@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowUpRight, Asterisk } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import {
   Dialog,
@@ -11,6 +10,7 @@ import {
   DialogTitle,
 } from "@/shared/components/ui/dialog";
 import { Textarea } from "@/shared/components/ui/textarea";
+import { useAsyncAction } from "@/shared/hooks/use-async-action";
 
 export function NewTaskDialog({
   open,
@@ -19,30 +19,27 @@ export function NewTaskDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreate: (description: string) => void;
+  onCreate: (description: string) => void | Promise<void>;
 }) {
   const [description, setDescription] = useState("");
+  const { pending, error, run } = useAsyncAction();
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => { if (!pending) onOpenChange(next); }}>
       <DialogContent className="p-6 sm:max-w-lg">
-        <div className="mb-1 flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-          <Asterisk className="size-6" />
-        </div>
         <DialogHeader>
           <DialogTitle className="text-xl font-semibold">
-            С чего начнём?
+            Новая задача
           </DialogTitle>
           <DialogDescription className="leading-relaxed">
-            Расскажите о проблеме своими словами. Детали соберём вместе —
-            идеальное описание пока не нужно.
+            Опишите проблему. Ассистент поможет уточнить детали.
           </DialogDescription>
         </DialogHeader>
         <form
           className="mt-2 space-y-4"
-          onSubmit={(event) => {
+          onSubmit={async (event) => {
             event.preventDefault();
-            if (description.trim().length < 10) return;
-            onCreate(description.trim());
+            if (description.trim().length < 20) return;
+            if (!await run(() => onCreate(description.trim()))) return;
             setDescription("");
             onOpenChange(false);
           }}
@@ -52,25 +49,26 @@ export function NewTaskDialog({
           </label>
           <Textarea
             id="new-task-description"
+            disabled={pending}
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             placeholder="Например, каждый вечер в нашей пекарне остаётся непроданная выпечка. Хотим понять, сколько готовить…"
             className="min-h-36 resize-none bg-muted/40 p-3 text-sm leading-relaxed"
             required
-            minLength={10}
-            maxLength={4000}
+            minLength={20}
+            maxLength={2000}
           />
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <div className="flex items-center justify-between gap-3">
             <span className="text-[11px] text-muted-foreground">
               Черновик виден только бизнесу
             </span>
             <Button
               type="submit"
-              disabled={description.trim().length < 10}
+              disabled={pending || description.trim().length < 20}
               className="h-9"
             >
-              Создать черновик
-              <ArrowUpRight className="size-4" />
+              {pending ? "Создаём…" : "Создать черновик"}
             </Button>
           </div>
         </form>

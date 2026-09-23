@@ -1,16 +1,16 @@
-import type { NextRequest } from 'next/server';
+import { getDemoActor } from '@/shared/api/actor';
+import { withApi, readJson } from '@/shared/api/errors';
+import { jsonOk } from '@/shared/api/handler';
+import { createTaskRequestSchema, createTaskResponseSchema, listTasksResponseSchema } from '@/shared/api/contracts/tasks';
+import { createTask, listTasks } from '@/features/task-match/api/tasks';
 
-import { createTaskRequestSchema, createTaskResponseSchema } from '@/shared/api/contracts/tasks';
-import { getDemoActor } from '@/shared/api/demo-actor';
-import { jsonOk, parseBody, readJsonBody, withErrorHandling } from '@/shared/api/handler';
-import { createTask } from '@/features/tasks/api/create-task';
+export const GET = withApi(async (_request: Request) => {
+  await getDemoActor();
+  return jsonOk(await listTasks(), listTasksResponseSchema);
+});
 
-/** POST /api/tasks — раздел 10 ТЗ, FR-1.1, ADR-009 §6. */
-export async function POST(request: NextRequest) {
-  return withErrorHandling(async () => {
-    const actor = await getDemoActor(request);
-    const body = parseBody(createTaskRequestSchema, await readJsonBody(request));
-    const result = await createTask(actor, body);
-    return jsonOk(createTaskResponseSchema, result, { status: 201 });
-  });
-}
+export const POST = withApi(async (request: Request) => {
+  await getDemoActor();
+  const body = createTaskRequestSchema.parse(await readJson(request));
+  return jsonOk(await createTask(body), createTaskResponseSchema, 201);
+});

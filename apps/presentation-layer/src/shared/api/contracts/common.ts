@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import { resourceIdSchema } from './resource-id';
+
+/** ISO timestamps on the wire; Date rows are serialized by jsonOk before validation. */
+export const dateTimeSchema = z.iso.datetime({ offset: true });
 
 /** Раздел 6.1 ТЗ: 17 узлов рейтинга. */
 export const nodeIdSchema = z.enum([
@@ -75,12 +79,8 @@ export const swipeActionSchema = z.enum(['skip', 'missing']);
 export type SwipeAction = z.infer<typeof swipeActionSchema>;
 
 /** FR-6.1: проверка URL прототипа/репозитория, необязательная. */
-export const optionalUrlSchema = z
-  .string()
-  .trim()
-  .url({ message: 'Ссылка должна быть корректным URL.' })
-  .optional()
-  .or(z.literal('').transform(() => undefined));
+export const httpUrlSchema = z.url({ protocol: /^https?$/, message: 'Нужна ссылка http(s)' });
+export const optionalUrlSchema = httpUrlSchema.optional().or(z.literal('').transform(() => undefined));
 
 export const criterionSchema = z.object({
   id: z.string(),
@@ -95,48 +95,34 @@ export type Criterion = z.infer<typeof criterionSchema>;
 
 export const fieldSchema = z.object({
   node: nodeIdSchema,
-  value: z.string(),
+  value: z.unknown(),
   state: fieldStateSchema,
   notApplicable: z.boolean(),
-  naNote: z.string().optional(),
+  naNote: z.string().nullable().optional(),
   source: z.enum(['draft', 'turn', 'manual']),
-  sourceQuote: z.string().optional(),
-  sourceTurnId: z.string().optional(),
+  sourceQuote: z.string().nullable().optional(),
+  sourceTurnId: z.number().int().nullable().optional(),
 });
 export type Field = z.infer<typeof fieldSchema>;
 
+/** Canonical persisted business task. Workspace's nine-group view is a projection. */
 export const taskSchema = z.object({
-  id: z.string(),
-  businessId: z.string(),
-  title: z.string(),
-  topic: z.string(),
-  draftText: z.string(),
-  status: taskStatusSchema,
-  format: workFormatSchema,
-  paymentTerms: z.string().optional(),
-  neededRoles: z.array(z.string()),
-  neededSkills: z.array(z.string()),
-  tagsState: fieldStateSchema,
-  score: z.number().int().min(0).max(100),
-  level: readinessLevelSchema,
-  fields: z.array(fieldSchema),
-  criteria: z.array(criterionSchema),
-  criteriaVersion: z.number().int(),
-  createdAt: z.string(),
-  publishedAt: z.string().optional(),
+  id: resourceIdSchema, businessId: resourceIdSchema, title: z.string(), company: z.string(), topic: z.string(),
+  description: z.string(), status: taskStatusSchema, engagement: workFormatSchema,
+  compensationNote: z.string().nullable(), neededRoles: z.array(z.string()), neededSkills: z.array(z.string()),
+  tagsState: z.enum(['suggested','confirmed']), score: z.number().int().min(0).max(100),
+  criteriaVersion: z.number().int(), version: z.number().int(),
+  createdAt: dateTimeSchema, updatedAt: dateTimeSchema, publishedAt: dateTimeSchema.nullable(),
+  workFormat: z.string().nullable(), paymentTerms: z.string().nullable(),
+  legacyWorkspace: z.record(z.string(), z.unknown()).nullable(),
 });
 export type ApiTask = z.infer<typeof taskSchema>;
-
-/**
- * ADR-008 §3: команда видит только `confirmed`-поля чужой (опубликованной)
- * задачи; черновой текст (`draftText`) и внутренний `businessId` не
- * относятся к тому, что показывает каталог/рекомендации. Каталог и
- * рекомендации (`contracts/catalog.ts`, `contracts/recommendations.ts`)
- * отдают эту, «публичную», форму задачи, а не полную `taskSchema`,
- * используемую в ответах эндпоинтов, которые читает бизнес-владелец.
- */
-export const publicTaskSchema = taskSchema.omit({ businessId: true, draftText: true });
+export const publicFieldSchema = fieldSchema.pick({node:true,value:true,state:true,notApplicable:true}).extend({confirmedAt:dateTimeSchema.nullable().optional()});
+export const publicTaskSchema = taskSchema.pick({
+  id:true,businessId:true,company:true,title:true,topic:true,status:true,engagement:true,compensationNote:true,
+  neededRoles:true,neededSkills:true,score:true,publishedAt:true,criteriaVersion:true,
+}).extend({fields:z.array(publicFieldSchema)});
 export type PublicApiTask = z.infer<typeof publicTaskSchema>;
 
 /** Общий параметр маршрута с идентификатором. */
-export const idParamSchema = z.object({ id: z.string().min(1, 'Не передан идентификатор.') });
+export const idParamSchema = z.object({ id: resourceIdSchema });

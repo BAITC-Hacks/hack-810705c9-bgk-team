@@ -1,42 +1,46 @@
-import type { CatalogQuery, CatalogResponse } from '@/shared/api/contracts/catalog';
-import { store, toPublicTask } from '@/shared/api/store';
-import { calculateScore, levelForScore, missingNodes } from '@/shared/api/store/scoring';
+// ADR-006 п. 5: каталог — все опубликованные задачи, без fit и без свайпов.
+import { and, asc, between, desc, eq, or, sql, type SQL } from 'drizzle-orm';
+import { levelRange } from '@/entities/task/model/level';
+import { openBlocksOf } from '@/features/task-card/api/open-blocks';
+import { toTaskTile } from '@/entities/task/model/to-tile';
+import type {
+  CatalogQuery,
+  CatalogResponse,
+} from '@/shared/api/contracts/task-match';
+import { db } from '@/shared/db';
+import { tasks } from '@/shared/db/schema';
 
-/**
- * INTEGRATION(ADR-006 §5): getCatalog(filters) — отдельный запрос без fit и
- * без учёта свайпов. Полная версия читает `nextjs_db` напрямую (SQL-сортировка
- * FR-4.4, фильтры FR-4.5); эта — фильтрует in-memory store тем же контрактом,
- * чтобы серверные компоненты и `GET /api/catalog` могли использовать одну
- * функцию (ADR-009 §2) уже сейчас.
- */
-export function getCatalog(query: CatalogQuery): CatalogResponse {
-  const items = [...store.tasks.values()]
-    .filter((task) => task.status === 'published' || task.status === 'in_work' || task.status === 'closed')
-    .filter((task) => !query.topic || task.topic === query.topic)
-    .filter((task) => !query.role || task.neededRoles.includes(query.role))
-    .filter((task) => !query.format || task.format === query.format || task.format === 'both')
-    .map((task) => {
-      const score = calculateScore(task);
-      return { task, score, level: levelForScore(score) };
-    })
-    .filter(({ level }) => !query.level || level === query.level)
-    // FR-4.4: рейтинг по убыванию, при равенстве — дата публикации.
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return (a.task.publishedAt ?? '').localeCompare(b.task.publishedAt ?? '');
-    })
-    .map(({ task, score }) => ({
-      // ADR-008 §3: каталог/рекомендации видит и команда — только
-      // подтверждённые поля, без draftText/businessId (toPublicTask).
-      task: toPublicTask(task),
-      label:
-        score <= 39
-          ? ('needs_clarification' as const)
-          : score >= 90
-            ? ('fully_ready' as const)
-            : undefined,
-      unknown: missingNodes(task),
-    }));
+export async function getCatalog(
+  filters: CatalogQuery,
+): Promise<CatalogResponse> {
+  const conditions: (SQL | undefined)[] = [eq(tasks.status, 'published')];
+  if (filters.topic) conditions.push(eq(tasks.topic, filters.topic));
+  if (filters.level) {
+    const { min, max } = levelRange(filters.level);
+    conditions.push(between(tasks.score, min, max));
+  }
+  if (filters.role) {
+    conditions.push(sql`${filters.role} = ANY(${tasks.neededRoles})`);
+  }
+  if (filters.format && filters.format !== 'both') {
+    conditions.push(
+      or(eq(tasks.engagement, filters.format), eq(tasks.engagement, 'both')),
+    );
+  }
 
-  return { items };
+  // FR-4.4: зеркально compareCatalog — рейтинг ↓, дата публикации ↑, id.
+  const rows = await db
+    .select()
+    .from(tasks)
+    .where(and(...conditions))
+    .orderBy(
+      desc(tasks.score),
+      sql`${tasks.publishedAt} ASC NULLS LAST`,
+      asc(tasks.id),
+    );
+
+  const unknown = await openBlocksOf(rows.map((r) => r.id));
+  return {
+    items: rows.map((r) => toTaskTile(r, unknown.get(r.id) ?? [])),
+  };
 }

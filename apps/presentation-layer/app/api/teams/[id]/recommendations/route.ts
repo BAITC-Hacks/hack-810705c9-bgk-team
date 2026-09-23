@@ -1,17 +1,12 @@
-import type { NextRequest } from 'next/server';
-
-import { recommendationsParamsSchema, recommendationsResponseSchema } from '@/shared/api/contracts/recommendations';
-import { jsonOk, parseParams, withErrorHandling } from '@/shared/api/handler';
 import { getRecommendations } from '@/features/recommendations/api/get-recommendations';
+import { teamIdParamSchema, recommendationsResponseSchema } from '@/shared/api/contracts/task-match';
+import { notFound, withApi } from '@/shared/api/errors';
+import { jsonOk } from '@/shared/api/handler';
 
-/** GET /api/teams/:id/recommendations — раздел 10, ADR-006 §2 (FR-5.3, FR-5.4). */
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  return withErrorHandling(async () => {
-    const { id } = await parseParams(recommendationsParamsSchema, params);
-    const result = getRecommendations(id);
-    return jsonOk(recommendationsResponseSchema, result);
-  });
-}
+export const dynamic = 'force-dynamic';
+export const GET = withApi(async (_request: Request, { params }: { params: Promise<{ id: string }> }) => {
+  const { id } = teamIdParamSchema.parse(await params);
+  const result = await getRecommendations(id);
+  if (!result) throw notFound('Команда не найдена', { teamId: id });
+  return jsonOk(result, recommendationsResponseSchema);
+});

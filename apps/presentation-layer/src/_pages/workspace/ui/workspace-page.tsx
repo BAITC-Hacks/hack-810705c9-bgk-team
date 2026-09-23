@@ -1,23 +1,33 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
 import {
-  ArrowUpRight,
-  Asterisk,
-  BriefcaseBusiness,
-  ChevronRight,
-  CircleHelp,
-  GraduationCap,
-  List,
-  MessageSquare,
-  RotateCcw,
-  Users,
-} from "lucide-react";
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
+import {
+  ArrowsExpand,
+  ArrowDownToLine,
+  FileText,
+  Keyboard,
+  LayoutSideContentLeft,
+  LayoutSideContentRight,
+  Xmark,
+} from "@gravity-ui/icons";
+import type {
+  GroupImperativeHandle,
+  Layout,
+  PanelImperativeHandle,
+} from "react-resizable-panels";
 import { toast } from "sonner";
 import {
   calculateScore,
-  createTask,
-  getDemoData,
+  getTaskSummary,
+  readiness,
   TASK_FIELDS,
   type Message,
   type Role,
@@ -25,9 +35,27 @@ import {
   type TaskField,
   type WorkspaceData,
 } from "@/entities/workspace";
-import { TaskEditor } from "@/features/task-editor";
+import { requestError, workspaceApi, type WorkspaceSession, type WorkspaceSnapshot } from "@/entities/workspace/api";
+import { TaskEditor, hasTaskEditorChanges, type TaskEditorDraft } from "@/features/task-editor";
+import { TaskDocumentsPanel, TaskDocumentsProvider, useTaskDocuments } from "@/features/task-documents";
 import { TaskInspector } from "@/features/task-inspector";
+import { StudentCatalog } from "@/features/student-catalog";
+import { TeamPicker } from "@/features/team-picker";
+import { OnboardingScreen } from "@/features/onboarding";
 import { Button } from "@/shared/components/ui/button";
+import { IconAction } from "@/shared/components/icon-action";
+import { ThemeToggle } from "@/shared/components/theme-toggle";
+import { AiSanaLogo } from "@/shared/components/ai-sana-logo";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+} from "@/shared/components/ui/sheet";
+import {
+  isTextEditing,
+  shouldHandleShortcut,
+} from "@/shared/lib/keyboard-shortcuts";
 import {
   Dialog,
   DialogContent,
@@ -42,7 +70,8 @@ import {
 } from "@/shared/components/ui/resizable";
 import { Toaster } from "@/shared/components/ui/sonner";
 import { cn } from "@/shared/lib/utils";
-import { ChatPanel, TaskDetails } from "./chat-panel";
+import { ChatPanel } from "./chat-panel";
+import { CHAT_SKILLS, runChatSkill, type ChatSkillId } from "./chat-skills";
 import { NewTaskDialog } from "./new-task-dialog";
 import { TaskNavigation } from "./task-navigation";
 
@@ -54,26 +83,140 @@ function subscribeCompact(onChange: () => void) {
 }
 const getCompact = () => window.matchMedia(COMPACT_QUERY).matches;
 const getServerCompact = () => false;
+const DEFAULT_LAYOUT: Layout = {
+  "task-navigation": 16,
+  "task-conversation": 60,
+  "task-inspector": 24,
+};
+const FOCUS_LAYOUT: Layout = {
+  "task-navigation": 0,
+  "task-conversation": 100,
+  "task-inspector": 0,
+};
 
 export default function WorkspacePage() {
-  const [data, setData] = useState<WorkspaceData>(getDemoData);
-  const [role, setRole] = useState<Role>("business");
-  const [selectedId, setSelectedId] = useState("bakery-waste");
-  const [teamId, setTeamId] = useState(() => getDemoData().teams[0].id);
-  const [status, setStatus] = useState<"published" | "draft">("published");
-  const [tab, setTab] = useState<"assistant" | "card">("assistant");
+  return <TaskDocumentsProvider><WorkspaceLoader /></TaskDocumentsProvider>;
+}
+
+function WorkspaceLoader() {
+  const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [switching, setSwitching] = useState(false);
+
+  async function load() {
+    const next = await workspaceApi.load();
+    setSnapshot(next);
+    setError("");
+  }
+
+  async function retry() {
+    setLoading(true);
+    try { await load(); } catch (failure) { setError(requestError(failure)); }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => {
+    let active = true;
+    workspaceApi.load().then((next) => {
+      if (active) setSnapshot(next);
+    }).catch((failure) => {
+      if (active) setError(requestError(failure));
+    }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  async function changeSession(next: Partial<WorkspaceSession>) {
+    await workspaceApi.session(next);
+    await load();
+  }
+
+  const setData: Dispatch<SetStateAction<WorkspaceData>> = (update) => {
+    setSnapshot((current) => current ? {
+      ...current,
+      ...(typeof update === "function" ? update(current) : update),
+    } : current);
+  };
+
+  if (loading || !snapshot) return (
+    <main className="flex min-h-dvh items-center justify-center p-6">
+      <div className="absolute top-3 right-4"><ThemeToggle /></div>
+      <div className="max-w-md space-y-4 text-center" role={error ? "alert" : "status"}>
+        <h1 className="text-xl font-semibold">{loading ? "Загружаем рабочее пространство…" : "Не удалось загрузить данные"}</h1>
+        {error && <p className="text-sm text-muted-foreground">{error}</p>}
+        {!loading && <Button onClick={() => void retry()}>Попробовать снова</Button>}
+      </div>
+    </main>
+  );
+
+  if (!snapshot.session.onboardingCompleted) return <OnboardingScreen snapshot={snapshot} onComplete={load} />;
+
+  if (!snapshot.tasks.length) return (
+    <main className="flex min-h-dvh items-center justify-center p-6">
+      <div className="absolute top-3 right-4"><ThemeToggle /></div>
+      <div className="max-w-lg space-y-5 text-center">
+        <h1 className="text-2xl font-semibold">{snapshot.session.role === "business" ? "Создайте первую задачу" : "Пока нет опубликованных задач"}</h1>
+        <p className="text-sm text-muted-foreground">{snapshot.session.role === "business" ? "Опишите задачу, заполните карточку и опубликуйте её для студенческих команд." : "Бизнес ещё готовит задачи. Обновите каталог позже."}</p>
+        <div className="flex justify-center gap-3">
+          {snapshot.session.role === "business" && <Button onClick={() => setShowCreate(true)}>Новая задача</Button>}
+          <Button variant="outline" disabled={switching} onClick={async () => {
+            setSwitching(true);
+            try { await changeSession({ role: snapshot.session.role === "business" ? "student" : "business" }); }
+            catch (failure) { toast.error(requestError(failure)); }
+            finally { setSwitching(false); }
+          }}>{snapshot.session.role === "business" ? "Роль студента" : "Роль бизнеса"}</Button>
+          <Button variant="outline" onClick={() => void retry()}>Обновить</Button>
+        </div>
+      </div>
+      <NewTaskDialog open={showCreate} onOpenChange={setShowCreate} onCreate={async (description) => {
+        const task = await workspaceApi.createTask(description);
+        setData((current) => ({ ...current, tasks: [task, ...current.tasks] }));
+      }} />
+      <Toaster position="bottom-center" closeButton />
+    </main>
+  );
+
+  return <WorkspaceContent data={snapshot} setData={setData} session={snapshot.session} onSessionChange={changeSession} onReload={load} />;
+}
+
+function WorkspaceContent({ data, setData, session, onSessionChange, onReload }: {
+  data: WorkspaceSnapshot;
+  setData: Dispatch<SetStateAction<WorkspaceData>>;
+  session: WorkspaceSession;
+  onSessionChange: (next: Partial<WorkspaceSession>) => Promise<void>;
+  onReload: () => Promise<void>;
+}) {
+  const role = session.role;
+  const teamId = session.teamId ?? "";
+  const [switching, setSwitching] = useState(false);
+  const [selectedId, setSelectedId] = useState(data.tasks[0].id);
+  const [status, setStatus] = useState<"published" | "draft">(data.tasks[0].status);
+  const [cardOpen, setCardOpen] = useState(false);
+  const [documentsOpen, setDocumentsOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [industry, setIndustry] = useState("");
-  const [readinessFilter, setReadinessFilter] = useState("");
   const [conversations, setConversations] = useState<Record<string, Message[]>>(
     {},
   );
   const [taskDrafts, setTaskDrafts] = useState<Record<string, Task>>({});
-  const [resetGeneration, setResetGeneration] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
-  const [showDemo, setShowDemo] = useState(false);
-  const [mobilePane, setMobilePane] = useState<"tasks" | "chat" | "details">(
-    "chat",
+  const [showHelp, setShowHelp] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
+  const [navigationCollapsed, setNavigationCollapsed] = useState(false);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const panelsRef = useRef<GroupImperativeHandle>(null);
+  const navigationRef = useRef<PanelImperativeHandle>(null);
+  const inspectorRef = useRef<PanelImperativeHandle>(null);
+  const editorContentRef = useRef<HTMLDivElement>(null);
+  const documentsContentRef = useRef<HTMLDivElement>(null);
+  const mobileContentRef = useRef<HTMLDivElement>(null);
+  const editorReturnFocus = useRef<HTMLElement | null>(null);
+  const documentsReturnFocus = useRef<HTMLElement | null>(null);
+  const [editorDrafts] = useState(() => new Map<string, TaskEditorDraft>());
+  const previousLayout = useRef<Layout | undefined>(undefined);
+  const [mobileDrawer, setMobileDrawer] = useState<"tasks" | "details" | null>(
+    null,
   );
   const compact = useSyncExternalStore(
     subscribeCompact,
@@ -82,39 +225,220 @@ export default function WorkspacePage() {
   );
   const canonicalTask =
     data.tasks.find((item) => item.id === selectedId) ?? data.tasks[0];
-  const hasDraftEdits = role === "business" && !!taskDrafts[canonicalTask.id];
+  const hasDraftEdits = role === "business" && (
+    !!taskDrafts[canonicalTask.id] ||
+    hasTaskEditorChanges(editorDrafts.get(canonicalTask.id), canonicalTask)
+  );
   const task =
     role === "business"
       ? (taskDrafts[canonicalTask.id] ?? canonicalTask)
       : canonicalTask;
   const team = data.teams.find((item) => item.id === teamId) ?? data.teams[0];
-  const conversationKey = `${role}:${role === "student" ? teamId : "business"}:${task.id}`;
+  const taskDocuments = useTaskDocuments(task.id);
+  const conversationKey = task.id;
   const messages = conversations[conversationKey] ?? [];
-  const points =
-    data.proposals.filter(
-      (proposal) => proposal.teamId === teamId && proposal.milestoneConfirmed,
-    ).length * 10;
+  const points = data.proposals
+    .filter((proposal) => proposal.teamId === teamId)
+    .reduce((sum, proposal) => sum + (proposal.points ?? (proposal.milestoneConfirmed ? 10 : 0)), 0);
 
-  function changeRole(next: Role) {
-    setRole(next);
-    setTab("assistant");
-    setQuery("");
-    setIndustry("");
-    setReadinessFilter("");
-    setStatus("published");
-    if (task.status !== "published")
-      setSelectedId(
-        data.tasks.find((item) => item.status === "published")?.id ?? task.id,
-      );
+  async function changeRole(next: Role) {
+    if (next === role || switching) return;
+    setSwitching(true);
+    try {
+      await onSessionChange({ role: next });
+      setFocusMode(false);
+      setCardOpen(false);
+      setDocumentsOpen(false);
+      setMobileDrawer(null);
+      setQuery("");
+      setStatus("published");
+    } catch (failure) { toast.error(requestError(failure)); }
+    finally { setSwitching(false); }
   }
+
+  async function changeTeam(id: string) {
+    await onSessionChange({ teamId: id });
+  }
+
+  function toggleFocus() {
+    const panels = panelsRef.current;
+    if (!panels) return;
+    if (focusMode) {
+      panels.setLayout(previousLayout.current ?? DEFAULT_LAYOUT);
+    } else {
+      focusChatIfInside("task-navigation", "task-inspector");
+      previousLayout.current = panels.getLayout();
+      panels.setLayout(FOCUS_LAYOUT);
+    }
+    setFocusMode(!focusMode);
+  }
+
+  function focusChatIfInside(...panelIds: string[]) {
+    if (
+      panelIds.some((id) =>
+        document.getElementById(id)?.contains(document.activeElement),
+      )
+    ) {
+      document.getElementById("chat-message")?.focus();
+    }
+  }
+
+  function toggleNavigation() {
+    if (compact) {
+      setMobileDrawer((current) => (current === "tasks" ? null : "tasks"));
+      return;
+    }
+    setFocusMode(false);
+    if (navigationRef.current?.isCollapsed()) navigationRef.current.expand();
+    else {
+      focusChatIfInside("task-navigation");
+      navigationRef.current?.collapse();
+    }
+  }
+
+  function toggleProposals() {
+    if (compact) {
+      setMobileDrawer((current) => (current === "details" ? null : "details"));
+      return;
+    }
+    setFocusMode(false);
+    if (inspectorRef.current?.isCollapsed()) inspectorRef.current.expand();
+    else {
+      focusChatIfInside("task-inspector");
+      inspectorRef.current?.collapse();
+    }
+  }
+
+  function showProposals() {
+    if (compact) setMobileDrawer("details");
+    else {
+      setFocusMode(false);
+      inspectorRef.current?.expand();
+    }
+  }
+
+  function openCard() {
+    if (task.canEdit === false) {
+      toast.error("Изменять карточку может только её бизнес-владелец. Выберите свою задачу.");
+      return;
+    }
+    editorReturnFocus.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    setMobileDrawer(null);
+    setDocumentsOpen(false);
+    setCardOpen(true);
+  }
+
+  function openDocuments() {
+    documentsReturnFocus.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setMobileDrawer(null);
+    setCardOpen(false);
+    setDocumentsOpen(true);
+  }
+
+  function downloadTaskBrief() {
+    const score = calculateScore(canonicalTask);
+    const content = [
+      "AI-Sana · Карточка задачи",
+      `Статус: ${canonicalTask.status === "published" ? "Опубликована" : "Черновик"}`,
+      `Готовность: ${score}/100 · ${readiness(score).label}`,
+      "",
+      getTaskSummary(canonicalTask),
+    ].join("\n");
+    const url = URL.createObjectURL(new Blob(["\uFEFF", content], { type: "text/plain;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${canonicalTask.title.replace(/[^\p{L}\p{N} _-]/gu, "").trim().slice(0, 80) || "Задача"}.txt`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
+    const scope = documentsOpen
+      ? documentsContentRef.current
+      : cardOpen
+        ? editorContentRef.current
+      : compact && mobileDrawer
+        ? mobileContentRef.current
+        : null;
+    if (!shouldHandleShortcut(event, scope)) return;
+    if (event.key === "Escape" && scope) {
+      event.preventDefault();
+      if (documentsOpen) setDocumentsOpen(false);
+      else if (cardOpen) setCardOpen(false);
+      else setMobileDrawer(null);
+      return;
+    }
+    if (role === "business" && event.altKey && !event.shiftKey) {
+      if (documentsOpen && event.code !== "Digit4") return;
+      if (cardOpen && event.code !== "Digit2") return;
+      if (
+        compact &&
+        mobileDrawer &&
+        event.code !== (mobileDrawer === "tasks" ? "Digit1" : "Digit3")
+      )
+        return;
+      const actions: Record<string, () => void> = {
+        Digit1: toggleNavigation,
+        Digit2: () => (cardOpen ? setCardOpen(false) : openCard()),
+        Digit3: toggleProposals,
+        Digit4: () => (documentsOpen ? setDocumentsOpen(false) : openDocuments()),
+        ...(!compact ? { Digit0: toggleFocus } : {}),
+      };
+      if (actions[event.code]) {
+        event.preventDefault();
+        actions[event.code]();
+      }
+      return;
+    }
+    if (documentsOpen || cardOpen || (compact && mobileDrawer)) return;
+    if (
+      role === "business" &&
+      (event.ctrlKey || event.metaKey) &&
+      !event.altKey &&
+      !event.shiftKey &&
+      event.code === "KeyK"
+    ) {
+      event.preventDefault();
+      document.getElementById("chat-message")?.focus();
+    } else if (
+      event.key === "?" &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      !isTextEditing(event.target)
+    ) {
+      event.preventDefault();
+      setShortcutsOpen(true);
+    } else if (event.key === "Escape" && focusMode) {
+      event.preventDefault();
+      toggleFocus();
+    }
+  });
+  useEffect(() => {
+    document.addEventListener("keydown", handleShortcut, true);
+    return () => document.removeEventListener("keydown", handleShortcut, true);
+  }, []);
 
   function selectTask(id: string) {
     setSelectedId(id);
-    setTab("assistant");
-    setMobilePane("chat");
+    setCardOpen(false);
+    setDocumentsOpen(false);
+    setMobileDrawer(null);
   }
 
-  function saveTask(next: Task) {
+  async function saveTask(input: Task) {
+    if (task.canEdit === false) {
+      toast.error("Изменять карточку может только её бизнес-владелец. Выберите свою задачу.");
+      return;
+    }
+    const next = await workspaceApi.saveTask(input);
+    editorDrafts.delete(next.id);
     setData((current) => ({
       ...current,
       tasks: current.tasks.map((item) => (item.id === next.id ? next : item)),
@@ -135,9 +459,12 @@ export default function WorkspacePage() {
       });
   }
 
-  function sendMessage(text: string, field?: TaskField) {
+  async function sendMessage(text: string, field?: TaskField, skill?: ChatSkillId) {
     let response = "";
-    if (role === "business" && field) {
+    if (skill) {
+      response = runChatSkill(task, data.proposals, data.teams, skill, text);
+    } else if (field) {
+      if (task.canEdit === false) throw new Error("Изменять карточку может только её бизнес-владелец.");
       const label = TASK_FIELDS.find((item) => item.key === field)?.label;
       const update = (item: Task): Task => ({
         ...item,
@@ -150,77 +477,63 @@ export default function WorkspacePage() {
           [task.id]: update(current[task.id] ?? canonicalTask),
         }));
       } else {
+        const saved = await workspaceApi.saveTask(update(task));
         setData((current) => ({
           ...current,
           tasks: current.tasks.map((item) =>
-            item.id === task.id ? update(item) : item,
+            item.id === saved.id ? saved : item,
           ),
         }));
       }
       response = `Добавила ваш ответ в поле «${label}» без изменений.\n\nОткройте карточку, проверьте текст и подтвердите сведения — после этого пересчитается рейтинг.`;
-    } else if (role === "business") {
-      response =
-        "Уточнение осталось в этой беседе. В демо-режиме выберите один из вопросов выше, чтобы записать ответ в нужное поле, или откройте «Карточку задачи».\n\nЯ не добавляю неподтверждённые факты и не публикую задачу за вас.";
     } else {
-      const normalized = text.toLocaleLowerCase("ru");
-      if (/данн|материал|источник/.test(normalized))
-        response =
-          task.fields.data ||
-          "Бизнес пока не описал доступные данные. Укажите в своём предложении, что понадобится для проверки идеи.";
-      else if (/оцен|успех|критери|метрик/.test(normalized))
-        response =
-          task.fields.success ||
-          "Критерии успеха ещё не указаны. Предложите измеримый результат и согласуйте его с бизнесом.";
-      else if (/срок|огранич|технол/.test(normalized))
-        response =
-          task.fields.constraints ||
-          "Сроки и ограничения пока не указаны. Вы можете предложить их в отклике.";
-      else if (/контакт|связ|встреч/.test(normalized))
-        response =
-          [task.fields.contact, task.fields.interaction]
-            .filter(Boolean)
-            .join("\n\n") ||
-          "Контакт ещё не указан. Этот вопрос можно добавить в отклик.";
-      else
-        response = `По карточке бизнеса ожидаемый результат:\n${task.fields.outcome || task.fields.need || task.description}\n\nВ демонстрации я могу показать сведения о данных, сроках и критериях успеха. Для отклика нажмите «Предложить решение» справа.`;
+      const reply = await workspaceApi.chat(task.id, [
+        { role: "user", content: task.description },
+        ...messages.map(({ role, content }) => ({ role, content })),
+        { role: "user", content: text },
+      ]);
+      response = reply.text;
     }
     setConversations((current) => ({
       ...current,
       [conversationKey]: [
         ...(current[conversationKey] ?? []),
-        { id: crypto.randomUUID(), role: "user", content: text },
+        {
+          id: crypto.randomUUID(),
+          role: "user",
+          content: skill
+            ? `@${CHAT_SKILLS.find((item) => item.id === skill)?.label}${text ? `\n${text}` : ""}`
+            : text,
+        },
         { id: crypto.randomUUID(), role: "assistant", content: response },
       ],
     }));
   }
 
-  function resetDemo() {
-    const next = getDemoData();
-    setData(next);
-    setConversations({});
-    setTaskDrafts({});
-    setResetGeneration((current) => current + 1);
-    setShowCreate(false);
-    setRole("business");
-    setSelectedId(next.tasks[0].id);
-    setTeamId(next.teams[0].id);
-    setQuery("");
-    setIndustry("");
-    setReadinessFilter("");
-    setStatus("published");
-    setTab("assistant");
-    setShowDemo(false);
-    setMobilePane("chat");
-    toast.success("Демонстрация начата заново");
+  async function refreshWorkspace() {
+    if (switching) return;
+    setSwitching(true);
+    try {
+      await onReload();
+      setShowCreate(false);
+      setQuery("");
+      setCardOpen(false);
+      setShortcutsOpen(false);
+      setShowHelp(false);
+      setFocusMode(false);
+      setMobileDrawer(null);
+      toast.success("Сохранённые данные обновлены");
+    } catch (failure) { toast.error(requestError(failure)); }
+    finally { setSwitching(false); }
   }
 
   const navigation = (
     <TaskNavigation
-      role={role}
       tasks={data.tasks}
       selectedId={task.id}
       onSelect={selectTask}
       onCreate={() => setShowCreate(true)}
+      onClose={toggleNavigation}
       query={query}
       onQuery={setQuery}
       status={status}
@@ -230,341 +543,524 @@ export default function WorkspacePage() {
         const first = data.tasks.find((item) => item.status === next);
         if (first) selectTask(first.id);
       }}
-      industry={industry}
-      onIndustry={setIndustry}
-      readinessFilter={readinessFilter}
-      onReadiness={setReadinessFilter}
-      teams={data.teams}
-      activeTeamId={teamId}
-      onTeam={setTeamId}
-      points={points}
     />
   );
   const center = (
     <main
-      className="workspace-panel flex flex-col bg-white"
-      aria-label="Работа с задачей"
+      className="workspace-panel flex flex-col bg-card"
+      aria-label="Чат по задаче"
     >
-      <div className="shrink-0 px-6 pt-5 lg:px-7">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="mb-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <span>{task.industry}</span>
-              <span className="text-border">/</span>
-              <span className="truncate">{task.company}</span>
-            </div>
-            <h1 className="text-[20px] leading-snug font-semibold tracking-[-.6px] xl:text-[23px]">
-              {task.title}
-            </h1>
-          </div>
-          <span
-            className={cn(
-              "mt-0.5 flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[9px] font-medium",
-              task.status === "published" && !hasDraftEdits
-                ? "bg-emerald-50 text-emerald-700"
-                : "bg-amber-50 text-amber-700",
-            )}
+      <header className="flex shrink-0 items-center gap-3 border-b px-4 py-3 lg:px-5">
+        <div className="min-w-0 flex-1">
+          <h1
+            className="truncate text-lg font-bold tracking-tight"
+            title={task.title}
           >
-            <span
-              className={cn(
-                "size-1 rounded-full",
-                task.status === "published" && !hasDraftEdits
-                  ? "bg-emerald-500"
-                  : "bg-amber-500",
-              )}
-            />
-            {hasDraftEdits
-              ? "Есть изменения"
-              : task.status === "published"
-                ? "Опубликована"
-                : "Черновик"}
-          </span>
+            {task.title}
+          </h1>
+          <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+            <span className="truncate">Чат по задаче · {task.company}</span>
+            <button
+              type="button"
+              onClick={openCard}
+              className="shrink-0 font-semibold text-foreground underline-offset-4 hover:underline"
+              aria-label={`Готовность задачи: ${calculateScore(canonicalTask)} из 100. Открыть карточку`}
+              title="Готовность подтверждённой карточки"
+            >
+              {calculateScore(canonicalTask)} / 100
+            </button>
+            <span className="hidden shrink-0 sm:inline">
+              ·{" "}
+              {hasDraftEdits
+                ? "Есть изменения"
+                : task.status === "published"
+                  ? "Опубликована"
+                  : "Черновик"}
+            </span>
+          </div>
         </div>
         <div
-          role="tablist"
-          aria-label="Содержание задачи"
-          className="mt-5 flex gap-6 border-b"
+          className="flex shrink-0 items-center gap-0.5"
+          role="group"
+          aria-label="Панели задачи"
         >
-          {(
-            [
-              ["assistant", "Ассистент"],
-              ["card", "Карточка задачи"],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              id={`tab-${value}`}
-              role="tab"
-              type="button"
-              key={value}
-              aria-selected={tab === value}
-              aria-controls="task-content"
-              tabIndex={tab === value ? 0 : -1}
-              onKeyDown={(event) => {
-                if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-                  const next = tab === "assistant" ? "card" : "assistant";
-                  setTab(next);
-                  document.getElementById(`tab-${next}`)?.focus();
-                }
-              }}
-              onClick={() => setTab(value)}
-              className={cn(
-                "border-b-2 px-0.5 pt-1 pb-3 text-[12px] transition-colors focus-visible:outline-2 focus-visible:outline-primary",
-                tab === value
-                  ? "border-primary font-medium text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
+          <IconAction
+            label="Список задач"
+            shortcut="Alt + 1"
+            aria-keyshortcuts="Alt+1"
+            aria-pressed={!compact && !navigationCollapsed}
+            onClick={toggleNavigation}
+          >
+            <LayoutSideContentLeft className="size-4" />
+          </IconAction>
+          <IconAction
+            label="Карточка задачи"
+            shortcut="Alt + 2"
+            aria-keyshortcuts="Alt+2"
+            aria-expanded={cardOpen}
+            onClick={openCard}
+          >
+            <FileText className="size-4" />
+          </IconAction>
+          <IconAction
+            label="Отклики команд"
+            shortcut="Alt + 3"
+            aria-keyshortcuts="Alt+3"
+            aria-pressed={!compact && !inspectorCollapsed}
+            onClick={toggleProposals}
+          >
+            <LayoutSideContentRight className="size-4" />
+          </IconAction>
+          {!compact && (
+            <IconAction
+              label={focusMode ? "Вернуть панели" : "Развернуть чат"}
+              shortcut="Alt + 0"
+              aria-keyshortcuts="Alt+0"
+              aria-pressed={focusMode}
+              onClick={toggleFocus}
             >
-              {label}
-            </button>
-          ))}
-          {role === "business" && tab === "assistant" && (
-            <button
-              type="button"
-              onClick={() => setTab("card")}
-              className="ml-auto mb-2 hidden items-center gap-1 text-[10px] text-primary xl:flex"
-            >
-              {task.status === "draft" ? "К публикации" : "Улучшить"}
-              <ArrowUpRight className="size-3" />
-            </button>
+              <ArrowsExpand className="size-4" />
+            </IconAction>
           )}
         </div>
-      </div>
-      <div
-        id="task-content"
-        role="tabpanel"
-        aria-labelledby={`tab-${tab}`}
-        className="flex min-h-0 flex-1 flex-col"
-      >
-        {tab === "assistant" ? (
-          <ChatPanel
-            key={`${role}:${task.id}:${teamId}`}
-            role={role}
-            task={task}
-            messages={messages}
-            onSend={sendMessage}
-            onEdit={() => setTab("card")}
-          />
-        ) : role === "business" ? (
-          <TaskEditor
-            key={task.id}
-            task={task}
-            savedTask={canonicalTask}
-            onSave={saveTask}
-            onCancel={() => setTab("assistant")}
-          />
-        ) : (
-          <TaskDetails task={task} />
-        )}
-      </div>
+      </header>
+      <ChatPanel
+        key={task.id}
+        task={task}
+        messages={messages}
+        onSend={sendMessage}
+        onEdit={openCard}
+        onShowProposals={showProposals}
+        documents={taskDocuments.documents.map(({ id, file }) => ({ id, name: file.name }))}
+        onShowDocuments={openDocuments}
+        onShowShortcuts={() => setShortcutsOpen(true)}
+      />
     </main>
   );
   const inspector = (
-    <div className="workspace-panel bg-[#f8f8fa]">
-      <TaskInspector
-        role={role}
-        task={task}
-        teams={data.teams}
-        proposals={data.proposals}
-        activeTeamId={teamId}
-        onEditTask={() => {
-          setTab("card");
-          setMobilePane("chat");
-        }}
-        onDecision={(id, decision) => {
-          setData((current) => ({
-            ...current,
-            proposals: current.proposals.map((proposal) =>
-              proposal.id === id ? { ...proposal, status: decision } : proposal,
-            ),
-          }));
-          toast.success(
-            decision === "selected"
-              ? "Команда выбрана"
-              : decision === "rejected"
-                ? "Предложение отклонено"
-                : "Решение отменено",
-            {
-              description:
-                decision === "selected"
-                  ? "Можно продолжить просмотр и выбрать ещё одну команду."
-                  : "Отклик остаётся в списке.",
-            },
-          );
-        }}
-        onApply={(input) => {
-          const proposal = {
-            ...input,
-            id: crypto.randomUUID(),
-            taskId: task.id,
-            teamId,
-            status: "pending" as const,
-            milestoneConfirmed: false,
-          };
-          setData((current) => ({
-            ...current,
-            proposals: [...current.proposals, proposal],
-          }));
-          toast.success("Предложение отправлено", {
-            description: "Переключитесь в роль бизнеса, чтобы увидеть отклик.",
-          });
-        }}
-        onMilestone={(id) => {
-          setData((current) => ({
-            ...current,
-            proposals: current.proposals.map((proposal) =>
-              proposal.id === id && proposal.status === "selected"
-                ? { ...proposal, milestoneConfirmed: true }
-                : proposal,
-            ),
-          }));
-          toast.success("Этап подтверждён: +10 баллов команде", {
-            description: "Повторное подтверждение не начисляет баллы снова.",
-          });
-        }}
-      />
-    </div>
+    <TaskInspector
+      role={role}
+      task={task}
+      teams={data.teams}
+      proposals={data.proposals}
+      activeTeamId={teamId}
+      canUndoDecision={false}
+      onEditTask={openCard}
+      onClose={toggleProposals}
+      onDecision={async (id, decision, reason) => {
+        const saved = await workspaceApi.decide(id, decision, reason);
+        setData((current) => ({
+          ...current,
+          proposals: current.proposals.map((proposal) =>
+            proposal.id === id ? saved : proposal,
+          ),
+        }));
+        toast.success(
+          decision === "selected"
+            ? "Команда выбрана"
+            : decision === "rejected"
+              ? "Предложение отклонено"
+              : "Решение отменено",
+          {
+            description:
+              decision === "selected"
+                ? "Можно продолжить просмотр и выбрать ещё одну команду."
+                : "Отклик остаётся в списке.",
+          },
+        );
+      }}
+      onSubmitMilestone={async (id, submission) => {
+        const proposal = await workspaceApi.submitMilestone(id, submission);
+        setData((current) => ({
+          ...current,
+          proposals: current.proposals.map((item) =>
+            item.id === id ? proposal : item,
+          ),
+        }));
+        toast.success("Результат этапа отправлен", {
+          description: "Баллы появятся после подтверждения бизнесом.",
+        });
+      }}
+      onMilestone={async (id) => {
+        const proposal = await workspaceApi.confirmMilestone(id);
+        setData((current) => ({
+          ...current,
+          proposals: current.proposals.map((item) =>
+            item.id === id ? proposal : item,
+          ),
+        }));
+        toast.success("Этап подтверждён: +10 баллов команде", {
+          description: "Повторное подтверждение не начисляет баллы снова.",
+        });
+      }}
+    />
   );
 
   return (
     <div
-      key={resetGeneration}
-      className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[#fbfbfd]"
+      className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background"
     >
-      <header className="flex h-[68px] shrink-0 items-center justify-between gap-4 px-5 lg:px-7">
+      <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-4 sm:gap-3 lg:px-6">
         <div className="flex min-w-0 items-center gap-4">
           <button
             type="button"
-            onClick={() => setShowDemo(true)}
-            aria-label="О Sana"
-            className="flex items-center gap-1.5 rounded focus-visible:outline-2 focus-visible:outline-primary"
+            onClick={() => setShowHelp(true)}
+            aria-label="О AI-Sana"
+            data-logo-trigger
+            className="flex h-9 shrink-0 items-center rounded focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
           >
-            <Asterisk className="size-8 text-primary" strokeWidth={1.8} />
-            <span className="text-[28px] leading-none font-semibold tracking-[-1.4px]">
-              sana
-            </span>
+            <AiSanaLogo
+              aria-hidden="true"
+              className="h-auto w-20 min-[375px]:w-24 sm:w-28"
+            />
           </button>
           <span className="hidden h-5 w-px bg-border sm:block" />
-          <span className="hidden items-center gap-3 text-[11px] text-muted-foreground xl:flex">
-            <ChevronRight className="size-3" />
+          <span className="hidden items-center gap-3 text-[13px] font-medium text-muted-foreground xl:flex">
             Рабочее пространство
           </span>
         </div>
         <div
-          className="flex items-center rounded-full bg-[#f0eff4] p-1"
-          aria-label="Роль в демо"
+          className="flex items-center rounded-full bg-muted p-1"
+          aria-label="Режим работы"
         >
           {(
             [
-              ["business", "Бизнес", BriefcaseBusiness],
-              ["student", "Студент", GraduationCap],
+              ["business", "Бизнес"],
+              ["student", "Студент"],
             ] as const
-          ).map(([value, label, Icon]) => (
+          ).map(([value, label]) => (
             <button
               type="button"
               key={value}
               aria-pressed={role === value}
+              disabled={switching}
               onClick={() => changeRole(value)}
               className={cn(
-                "flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[11px] transition-all sm:px-5",
+                "flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors sm:px-5",
                 role === value
-                  ? "bg-white font-medium text-primary shadow-[0_1px_4px_#31255012] ring-1 ring-black/[.025]"
+                  ? "bg-card text-primary shadow-sm ring-1 ring-primary/5"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
-              <Icon className="hidden size-3.5 sm:block" />
               {label}
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-3">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowDemo(true)}
-            className="h-7 gap-1.5 bg-transparent px-2 text-[10px]"
+        <div className="flex items-center gap-1">
+          <ThemeToggle />
+          <IconAction
+            label="Горячие клавиши"
+            shortcut="?"
+            onClick={() => setShortcutsOpen(true)}
           >
-            <span className="size-1.5 rounded-full bg-amber-400" />
-            Демо
-            <CircleHelp className="size-3 text-muted-foreground" />
+            <Keyboard className="size-4" />
+          </IconAction>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowHelp(true)}
+            className="hidden h-8 gap-1.5 bg-transparent px-2 text-xs font-semibold min-[400px]:inline-flex"
+          >
+            Помощь
           </Button>
           <div
-            title={role === "business" ? "Представитель бизнеса" : team.name}
-            className="hidden size-8 items-center justify-center rounded-full bg-[#e9e4f8] text-[10px] font-medium text-primary sm:flex"
+            title={role === "business" ? data.business?.name ?? "Представитель бизнеса" : team?.name ?? "Студент"}
+            className="hidden size-8 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-primary sm:flex"
           >
-            {role === "business" ? "Б" : team.initials}
+            {role === "business" && data.business?.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={data.business.logoUrl} alt="Логотип компании" className="size-8 rounded-full object-contain" />
+            ) : role === "business" ? data.business?.name.charAt(0).toLocaleUpperCase("ru") ?? "Б" : team?.initials ?? "С"}
           </div>
         </div>
       </header>
-      {compact && (
-        <div className="flex shrink-0 gap-1 px-3 pb-2">
-          {(
-            [
-              ["tasks", "Задачи", List],
-              ["chat", "Ассистент", MessageSquare],
-              [
-                "details",
-                role === "business" ? "Отклики" : "Предложение",
-                Users,
-              ],
-            ] as const
-          ).map(([value, label, Icon]) => (
-            <Button
-              key={value}
-              variant={mobilePane === value ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => setMobilePane(value)}
-              className="flex-1 text-[11px]"
-            >
-              <Icon className="size-3.5" />
-              {label}
-            </Button>
-          ))}
-        </div>
-      )}
-      <div className="min-h-0 flex-1 px-3 pb-3">
-        {compact ? (
-          <div className="h-full">
-            {mobilePane === "tasks"
-              ? navigation
-              : mobilePane === "chat"
-                ? center
-                : inspector}
-          </div>
+      <div className={cn("min-h-0 flex-1", role === "business" && "p-3")}>
+        {role === "student" ? (
+          <StudentCatalog
+            tasks={data.tasks}
+            proposals={data.proposals}
+            activeTeamId={teamId}
+            selectedTaskId={canonicalTask.id}
+            onSelectTask={selectTask}
+            teamControl={
+              <TeamPicker
+                teams={data.teams}
+                activeTeamId={teamId}
+                onTeamChange={changeTeam}
+                points={points}
+                onTeamSave={async (input) => {
+                  const next = await workspaceApi.saveTeam(input, data.teams.some((item) => item.id === input.id));
+                  setData((current) => ({
+                    ...current,
+                    teams: current.teams.some((item) => item.id === next.id)
+                      ? current.teams.map((item) =>
+                          item.id === next.id ? next : item,
+                        )
+                      : [...current.teams, next],
+                  }));
+                  toast.success("Профиль команды сохранён");
+                  try { await changeTeam(next.id); }
+                  catch (failure) { toast.error(`Профиль сохранён, но переключить команду не удалось. ${requestError(failure)}`); }
+                }}
+              />
+            }
+          >
+            {inspector}
+          </StudentCatalog>
+        ) : compact ? (
+          center
         ) : (
-          <ResizablePanelGroup orientation="horizontal" className="gap-0">
+          <ResizablePanelGroup
+            orientation="horizontal"
+            className="gap-0"
+            groupRef={panelsRef}
+            defaultLayout={focusMode ? FOCUS_LAYOUT : DEFAULT_LAYOUT}
+            disabled={focusMode}
+          >
             <ResizablePanel
               id="task-navigation"
-              defaultSize="19%"
-              minSize="215px"
-              maxSize="28%"
+              panelRef={navigationRef}
+              defaultSize="16%"
+              minSize="208px"
+              maxSize="26%"
+              collapsible
+              collapsedSize={0}
+              onResize={(size) => {
+                if (size.asPercentage === 0)
+                  focusChatIfInside("task-navigation");
+                setNavigationCollapsed(size.asPercentage === 0);
+              }}
+              inert={focusMode || navigationCollapsed}
+              aria-hidden={focusMode || navigationCollapsed || undefined}
             >
               {navigation}
             </ResizablePanel>
-            <ResizableHandle className="w-2.5 bg-transparent after:w-2.5 hover:after:bg-primary/5" />
+            <ResizableHandle
+              aria-label="Ширина списка задач"
+              className={cn(
+                "w-2.5 bg-transparent after:w-2.5 hover:after:bg-primary/5",
+                focusMode && "hidden",
+              )}
+            />
             <ResizablePanel
               id="task-conversation"
-              defaultSize="51%"
-              minSize="380px"
+              defaultSize="60%"
+              minSize="480px"
             >
               {center}
             </ResizablePanel>
-            <ResizableHandle className="w-2.5 bg-transparent after:w-2.5 hover:after:bg-primary/5" />
+            <ResizableHandle
+              aria-label="Ширина панели откликов"
+              className={cn(
+                "w-2.5 bg-transparent after:w-2.5 hover:after:bg-primary/5",
+                focusMode && "hidden",
+              )}
+            />
             <ResizablePanel
               id="task-inspector"
-              defaultSize="30%"
+              panelRef={inspectorRef}
+              defaultSize="24%"
               minSize="310px"
               maxSize="42%"
+              collapsible
+              collapsedSize={0}
+              onResize={(size) => {
+                if (size.asPercentage === 0)
+                  focusChatIfInside("task-inspector");
+                setInspectorCollapsed(size.asPercentage === 0);
+              }}
+              inert={focusMode || inspectorCollapsed}
+              aria-hidden={focusMode || inspectorCollapsed || undefined}
             >
-              {inspector}
+              <div className="workspace-panel bg-workspace-surface">
+                {inspector}
+              </div>
             </ResizablePanel>
           </ResizablePanelGroup>
         )}
       </div>
+      <Sheet open={cardOpen && role === "business"} onOpenChange={setCardOpen}>
+        <SheetContent
+          ref={editorContentRef}
+          showCloseButton={false}
+          className="gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-[600px]"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            editorContentRef.current
+              ?.querySelector<HTMLInputElement>("input")
+              ?.focus();
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const previous = editorReturnFocus.current;
+            if (previous?.isConnected && !previous.closest("[inert]"))
+              previous.focus();
+            else document.getElementById("chat-message")?.focus();
+          }}
+        >
+          <SheetTitle className="sr-only">Карточка задачи</SheetTitle>
+          <SheetDescription className="sr-only">
+            Редактирование и подтверждение сведений перед публикацией.
+          </SheetDescription>
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b px-5 py-3">
+            <span className="truncate text-sm font-semibold" title={task.title}>
+              {task.title}
+            </span>
+            <div className="flex shrink-0 items-center gap-0.5">
+              <IconAction label="Скачать сохранённую карточку" onClick={downloadTaskBrief}>
+                <ArrowDownToLine className="size-4" />
+              </IconAction>
+              <IconAction
+                label="Закрыть карточку"
+                shortcut="Esc · Alt + 2"
+                onClick={() => setCardOpen(false)}
+              >
+                <Xmark className="size-4" />
+              </IconAction>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1">
+            <TaskEditor
+              key={task.id}
+              task={task}
+              savedTask={canonicalTask}
+              draftCache={editorDrafts}
+              onSave={saveTask}
+              onCancel={() => setCardOpen(false)}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+      <Sheet open={documentsOpen && role === "business"} onOpenChange={setDocumentsOpen}>
+        <SheetContent
+          ref={documentsContentRef}
+          showCloseButton={false}
+          className="gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-[600px]"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            documentsContentRef.current?.querySelector<HTMLButtonElement>("button[aria-controls]")?.focus();
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const previous = documentsReturnFocus.current;
+            if (previous?.isConnected && !previous.closest("[inert]")) previous.focus();
+            else document.getElementById("chat-message")?.focus();
+          }}
+        >
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b px-5 py-3">
+            <div className="min-w-0">
+              <SheetTitle className="text-sm font-semibold">Документы задачи</SheetTitle>
+              <p className="mt-1 truncate text-xs text-muted-foreground" title={task.title}>{task.title}</p>
+            </div>
+            <IconAction label="Закрыть документы" shortcut="Esc · Alt + 4" onClick={() => setDocumentsOpen(false)}>
+              <Xmark className="size-4" />
+            </IconAction>
+          </div>
+          <SheetDescription className="sr-only">Рабочие материалы текущей задачи. Документы доступны только в этой вкладке.</SheetDescription>
+          <div className="min-h-0 flex-1 overflow-y-auto p-5">
+            <TaskDocumentsPanel
+              key={task.id}
+              documents={taskDocuments.documents}
+              error={taskDocuments.error}
+              onAdd={taskDocuments.addDocuments}
+              onRemove={taskDocuments.removeDocument}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+      <Sheet
+        open={compact && mobileDrawer !== null && role === "business"}
+        onOpenChange={(open) => {
+          if (!open) setMobileDrawer(null);
+        }}
+      >
+        <SheetContent
+          ref={mobileContentRef}
+          side={mobileDrawer === "tasks" ? "left" : "right"}
+          showCloseButton={false}
+          className="gap-0 p-0 data-[side=left]:w-full data-[side=right]:w-full data-[side=left]:sm:max-w-[380px] data-[side=right]:sm:max-w-[420px] [&_.workspace-panel]:rounded-none [&_.workspace-panel]:border-0"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            const content = mobileContentRef.current;
+            const search = content?.querySelector<HTMLInputElement>("input");
+            if (search) search.focus();
+            else content?.focus();
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            document.getElementById("chat-message")?.focus();
+          }}
+        >
+          <SheetTitle className="sr-only">
+            {mobileDrawer === "tasks" ? "Мои задачи" : "Отклики команд"}
+          </SheetTitle>
+          <SheetDescription className="sr-only">
+            Панель текущей задачи. Escape закрывает панель и возвращает в чат.
+          </SheetDescription>
+          {mobileDrawer === "tasks" ? navigation : inspector}
+        </SheetContent>
+      </Sheet>
+      <Dialog open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
+        <DialogContent className="p-6 sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold">
+              Горячие клавиши
+            </DialogTitle>
+            <DialogDescription>
+              Быстрые действия в режиме{" "}
+              {role === "business" ? "бизнеса" : "студента"}.
+            </DialogDescription>
+          </DialogHeader>
+          <dl className="mt-2 divide-y text-sm">
+            {[
+              [
+                "Ctrl / ⌘ + K",
+                role === "business"
+                  ? "Перейти к сообщению"
+                  : "Поиск по каталогу",
+              ],
+              ...(role === "business"
+                ? [["Alt + 1", "Показать / скрыть задачи"]]
+                : []),
+              ["Alt + 2", "Открыть / закрыть карточку"],
+              [
+                "Alt + 3",
+                role === "business"
+                  ? "Показать / скрыть отклики"
+                  : "Открыть / закрыть команды",
+              ],
+              ...(role === "business" && !compact
+                ? [["Alt + 0", "Развернуть / свернуть чат"]]
+                : []),
+              ...(role === "business"
+                ? [
+                    ["Alt + 4", "Открыть / закрыть документы"],
+                    ["@", "Действия ассистента в сообщении"],
+                    ["↑ ↓ · Enter / Tab", "Выбрать действие из @-меню"],
+                    ["Shift + Enter", "Новая строка в сообщении"],
+                  ]
+                : []),
+              ["Esc", "Закрыть меню или верхнюю панель"],
+              ["?", "Эта подсказка вне поля ввода"],
+            ].map(([keys, description]) => (
+              <div
+                key={keys}
+                className="flex items-center justify-between gap-4 py-3"
+              >
+                <dt>{description}</dt>
+                <dd className="shrink-0 rounded border bg-muted px-2 py-1 text-xs font-medium">
+                  {keys}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </DialogContent>
+      </Dialog>
       <NewTaskDialog
         open={showCreate}
         onOpenChange={setShowCreate}
-        onCreate={(description) => {
-          const next = createTask(description);
+        onCreate={async (description) => {
+          const next = await workspaceApi.createTask(description);
           setData((current) => ({
             ...current,
             tasks: [next, ...current.tasks],
@@ -577,22 +1073,22 @@ export default function WorkspacePage() {
           });
         }}
       />
-      <Dialog open={showDemo} onOpenChange={setShowDemo}>
+      <Dialog open={showHelp} onOpenChange={setShowHelp}>
         <DialogContent className="p-6 sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="text-lg font-semibold">
-              Рабочее пространство в демо-режиме
+              AI-Sana
             </DialogTitle>
             <DialogDescription className="pt-2 leading-relaxed">
-              Это интерактивный frontend с вымышленными задачами и командами.
+              От бизнес-задачи до выбранной команды.
               Ассистент отвечает по подготовленным сценариям.
             </DialogDescription>
           </DialogHeader>
           <ol className="my-2 space-y-3 text-xs leading-relaxed">
             {[
               "Создайте задачу, ответьте на вопросы и подтвердите карточку.",
-              "Переключитесь в роль студента и предложите решение.",
-              "Вернитесь в роль бизнеса и выберите команду.",
+              "Команды находят задачи в каталоге и предлагают решения.",
+              "Сравните отклики и выберите команды, с которыми хотите работать.",
             ].map((step, index) => (
               <li key={step} className="flex gap-3">
                 <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] text-primary">
@@ -603,16 +1099,14 @@ export default function WorkspacePage() {
             ))}
           </ol>
           <p className="text-[11px] leading-relaxed text-muted-foreground">
-            Данные хранятся в памяти вкладки и сбрасываются при обновлении
-            страницы. Отправки во внешние сервисы нет.
+            Карточки, отклики и решения сохраняются. Переписка и прикреплённые документы доступны только в текущей вкладке.
           </p>
-          <Button variant="outline" onClick={resetDemo} className="mt-2">
-            <RotateCcw className="size-3.5" />
-            Начать демо заново
+          <Button variant="outline" disabled={switching} onClick={refreshWorkspace} className="mt-2">
+            Обновить сохранённые данные
           </Button>
         </DialogContent>
       </Dialog>
-      <Toaster theme="light" position="bottom-center" closeButton />
+      <Toaster position="bottom-center" closeButton />
     </div>
   );
 }

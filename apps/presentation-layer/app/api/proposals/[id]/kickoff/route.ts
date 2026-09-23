@@ -1,20 +1,12 @@
-import type { NextRequest } from 'next/server';
-
-import { idParamSchema } from '@/shared/api/contracts/common';
+import { getDemoActor } from '@/shared/api/actor';
+import { withApi } from '@/shared/api/errors';
+import { resourceIdSchema } from '@/shared/api/contracts/resource-id';
+import { jsonOk } from '@/shared/api/handler';
 import { kickoffResponseSchema } from '@/shared/api/contracts/proposals';
-import { getDemoActor } from '@/shared/api/demo-actor';
-import { jsonOk, parseParams, withErrorHandling } from '@/shared/api/handler';
-import { getKickoff } from '@/features/proposals/api/get-kickoff';
+import { getKickoff } from '@/features/stage-progress';
 
-/** GET /api/proposals/:id/kickoff — раздел 10, FR-7.9. */
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  return withErrorHandling(async () => {
-    const actor = await getDemoActor(request);
-    const { id } = await parseParams(idParamSchema, params);
-    const result = getKickoff(actor, id);
-    return jsonOk(kickoffResponseSchema, result);
-  });
-}
+export const GET = withApi(async (_request: Request, { params }: { params: Promise<{ id: string }> }) => {
+  const actor = await getDemoActor();
+  const id = resourceIdSchema.parse((await params).id);
+  return jsonOk(await getKickoff(actor, id), kickoffResponseSchema);
+});

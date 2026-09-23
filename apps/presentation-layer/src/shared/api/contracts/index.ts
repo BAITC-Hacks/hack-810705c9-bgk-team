@@ -8,3 +8,5 @@ export * from './recommendations';
 export * from './stages';
 export * from './swipes';
 export * from './tasks';
+export * from './score';
+export * from './resource-id';

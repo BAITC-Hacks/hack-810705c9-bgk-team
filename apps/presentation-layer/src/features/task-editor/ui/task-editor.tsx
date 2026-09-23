@@ -1,7 +1,7 @@
 "use client";
 
-import { useId, useRef, useState, type FormEvent } from "react";
-import { ArrowUpRight, Check, ChevronDown, Info, Save } from "lucide-react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { ChevronDown, CircleQuestion } from "@gravity-ui/icons";
 import {
   TASK_FIELDS,
   calculateScore,
@@ -22,15 +22,33 @@ import {
   TooltipTrigger,
 } from "@/shared/components/ui/tooltip";
 import { cn } from "@/shared/lib/utils";
+import { useAsyncAction } from "@/shared/hooks/use-async-action";
 
 type TaskEditorProps = {
   task: Task;
   savedTask?: Task;
-  onSave: (task: Task) => void;
+  draftCache?: Map<string, TaskEditorDraft>;
+  onSave: (task: Task) => void | Promise<void>;
   onCancel?: () => void;
 };
 
+export type TaskEditorDraft = {
+  source: Task;
+  draft: Task;
+  verified: boolean;
+};
+
 type EditorErrors = { title?: string; need?: string; confirmation?: string };
+type ScoreLine = { node: string; points: number; max: number; reason: string };
+
+const NODE_LABELS: Record<string, string> = {
+  "context.current": "Текущий процесс", "context.size": "Масштаб проблемы", "context.change": "Что изменится",
+  "data.what": "Данные и материалы", "data.volume": "Объём данных", "data.sample": "Пример данных",
+  "result.artifact": "Результат", "result.acceptance": "Формат сдачи", "criteria.items": "Критерии приёмки",
+  "constraints.deadline": "Срок", "constraints.stack": "Стек и роли", "constraints.other": "Другие ограничения",
+  "users.role": "Пользователи", "users.scale": "Количество пользователей",
+  "link.contact": "Контакт", "link.cadence": "Консультации", "link.response": "Ответ на отклик",
+};
 
 function nonemptyFields(task: Task): TaskField[] {
   return TASK_FIELDS.filter((field) => task.fields[field.key].trim()).map(
@@ -77,22 +95,51 @@ function sameText(first: Task, second: Task): boolean {
   );
 }
 
+export function hasTaskEditorChanges(
+  editor: TaskEditorDraft | undefined,
+  savedTask: Task,
+): boolean {
+  return Boolean(
+    editor &&
+      (!sameText(editor.draft, savedTask) ||
+        (editor.verified && !isFullyConfirmed(savedTask))),
+  );
+}
+
 export function TaskEditor({
   task,
   savedTask = task,
+  draftCache,
   onSave,
   onCancel,
 }: TaskEditorProps) {
+  const [serverScoreLines, setServerScoreLines] = useState<ScoreLine[] | null>(null);
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/tasks/${encodeURIComponent(savedTask.id)}/score`)
+      .then(async response => response.ok ? response.json() : null)
+      .then(result => { if (active) setServerScoreLines(result?.lines ?? null); })
+      .catch(() => { if (active) setServerScoreLines(null); });
+    return () => { active = false; };
+  }, [savedTask.id, savedTask.score, savedTask.version]);
   const id = useId();
   const titleRef = useRef<HTMLInputElement>(null);
   const needRef = useRef<HTMLTextAreaElement>(null);
   const confirmationRef = useRef<HTMLButtonElement>(null);
-  const [editor, setEditor] = useState(() => ({
-    source: task,
-    draft: task,
-    verified: isFullyConfirmed(task),
-  }));
+  const [editor, setEditor] = useState<TaskEditorDraft>(
+    () =>
+      draftCache?.get(task.id) ?? {
+        source: task,
+        draft: task,
+        verified: isFullyConfirmed(task),
+      },
+  );
   const [errors, setErrors] = useState<EditorErrors>({});
+  const { pending, error, run } = useAsyncAction();
+
+  useEffect(() => {
+    draftCache?.set(editor.source.id, editor);
+  }, [draftCache, editor]);
 
   if (editor.source !== task) {
     const draft = mergeTask(editor.source, editor.draft, task);
@@ -150,7 +197,7 @@ export function TaskEditor({
     }));
   }
 
-  function save(publish: boolean) {
+  async function save(publish: boolean) {
     const nextErrors: EditorErrors = {};
     if (!draft.title.trim()) nextErrors.title = "Добавьте название задачи.";
     if (!draft.fields.need.trim() && !draft.fields.context.trim()) {
@@ -184,12 +231,12 @@ export function TaskEditor({
       ) as Record<TaskField, string>,
       status: publish ? "published" : draft.status,
     };
+    if (!await run(() => onSave(nextTask))) return;
     setEditor((current) => ({
       ...current,
       draft: nextTask,
       verified: isFullyConfirmed(nextTask),
     }));
-    onSave(nextTask);
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -199,33 +246,37 @@ export function TaskEditor({
 
   return (
     <form
-      className="flex h-full min-h-0 flex-col overflow-y-auto bg-white"
+      className="flex h-full min-h-0 flex-col overflow-y-auto bg-card"
       onSubmit={handleSubmit}
       noValidate
       aria-label="Редактор карточки задачи"
     >
+      <fieldset disabled={pending} className="contents">
       <div className="space-y-7 px-5 py-5 sm:px-7">
         <div>
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-base font-semibold tracking-tight text-[#222134]">
+            <h2 className="text-lg font-bold tracking-tight text-foreground">
               Карточка задачи
             </h2>
-            <span className="text-xs text-[#92909e]">
+            <span className="text-xs font-medium text-muted-foreground">
               {changed ? "Есть изменения" : "Сохранено"}
             </span>
           </div>
-          <p className="mt-1.5 text-sm leading-relaxed text-[#858391]">
+          <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
             Заполните то, что знаете. Пропуски не мешают публикации.
           </p>
+          <Button asChild variant="outline" size="sm" className="mt-3">
+            <a href={`/task-match?task=${encodeURIComponent(task.id)}`}>Подробные поля и критерии приёмки</a>
+          </Button>
         </div>
 
         <section
-          className="rounded-xl border border-[#e8e6f0] p-4"
+          className="border-y py-4"
           aria-label="Готовность задачи"
         >
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-1.5">
-              <h3 className="text-sm font-medium text-[#343145]">
+              <h3 className="text-sm font-semibold text-foreground">
                 Сохранённая готовность
               </h3>
               <TooltipProvider>
@@ -234,9 +285,9 @@ export function TaskEditor({
                     <button
                       type="button"
                       aria-label="Как считается готовность"
-                      className="rounded-full p-1 text-[#92909e] outline-none focus-visible:ring-2 focus-visible:ring-[#7461cd]"
+                      className="rounded-full p-1 text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
-                      <Info className="size-3.5" aria-hidden="true" />
+                      <CircleQuestion className="size-4" aria-hidden="true" />
                     </button>
                   </TooltipTrigger>
                   <TooltipContent className="max-w-64 text-xs leading-relaxed">
@@ -246,8 +297,8 @@ export function TaskEditor({
                 </Tooltip>
               </TooltipProvider>
             </div>
-            <div className="shrink-0 text-sm tabular-nums text-[#92909e]">
-              <strong className="text-lg font-semibold text-[#7461cd]">
+            <div className="shrink-0 text-sm tabular-nums text-muted-foreground">
+              <strong className="text-2xl font-bold tracking-tight text-primary">
                 {savedScore}
               </strong>{" "}
               / 100
@@ -256,34 +307,24 @@ export function TaskEditor({
           <Progress
             value={savedScore}
             aria-label={`Сохранённая готовность: ${savedScore} из 100`}
-            className="mt-3 h-1.5 bg-[#eeecf4] [&_[data-slot=progress-indicator]]:bg-[#7461cd]"
+            className="mt-3 h-1.5 bg-muted [&_[data-slot=progress-indicator]]:bg-primary"
           />
           <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <span
-              className={cn(
-                savedReadiness.tone === "green"
-                  ? "text-emerald-700"
-                  : savedReadiness.tone === "amber"
-                    ? "text-amber-700"
-                    : savedReadiness.tone === "violet"
-                      ? "text-[#7461cd]"
-                      : "text-[#858391]",
-              )}
-            >
+            <span className="text-muted-foreground">
               {savedReadiness.label}
             </span>
-            {changed ? (
-              <span className="text-[#858391]">
+            {changed && savedTask.score === undefined ? (
+              <span className="text-muted-foreground">
                 {isPublished && !verified ? "Предпросмотр" : "После сохранения"}
                 :{" "}
-                <strong className="font-medium text-[#343145]">
+                <strong className="font-semibold text-foreground">
                   {previewScore} / 100
                 </strong>
               </span>
             ) : null}
           </div>
-          <details className="group mt-4 border-t border-[#eeecf3] pt-3">
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-sm text-xs font-medium text-[#7461cd] outline-none focus-visible:ring-2 focus-visible:ring-[#7461cd] [&::-webkit-details-marker]:hidden">
+          <details className="group mt-4 border-t border-border pt-3">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-sm text-[13px] font-semibold text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
               Из чего складывается оценка
               <ChevronDown
                 className="size-3.5 transition-transform group-open:rotate-180"
@@ -291,22 +332,29 @@ export function TaskEditor({
               />
             </summary>
             <div className="mt-4 space-y-3">
-              {breakdown.map((group, index) => (
+              {savedTask.score !== undefined ? (
+                serverScoreLines ? serverScoreLines.map((line) => (
+                  <div key={line.node} className="flex items-center justify-between gap-4 text-xs">
+                    <span className="text-foreground/80">{NODE_LABELS[line.node] ?? line.node}</span>
+                    <span className="shrink-0 tabular-nums text-muted-foreground">{line.points} / {line.max}</span>
+                  </div>
+                )) : <p className="text-xs text-muted-foreground">Расшифровка временно недоступна.</p>
+              ) : breakdown.map((group, index) => (
                 <div key={group.label}>
-                  <div className="flex items-center justify-between gap-4 text-xs">
-                    <span className="text-[#595667]">{group.label}</span>
-                    <span className="shrink-0 tabular-nums text-[#858391]">
+                  <div className="flex items-center justify-between gap-4 text-[13px]">
+                    <span className="text-foreground/80">{group.label}</span>
+                    <span className="shrink-0 tabular-nums text-muted-foreground">
                       {group.earned} / {group.max}
                       {changed &&
                       previewBreakdown[index].earned !== group.earned ? (
-                        <span className="ml-2 text-[#7461cd]">
+                        <span className="ml-2 text-primary">
                           → {previewBreakdown[index].earned}
                         </span>
                       ) : null}
                     </span>
                   </div>
                   {group.missing.length ? (
-                    <p className="mt-1 text-[11px] leading-relaxed text-[#9995a4]">
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                       Не подтверждено:{" "}
                       {group.missing
                         .map((key) =>
@@ -320,7 +368,7 @@ export function TaskEditor({
                   ) : null}
                 </div>
               ))}
-              <p className="border-t border-[#eeecf3] pt-3 text-[11px] leading-relaxed text-[#858391]">
+              <p className="border-t border-border pt-3 text-xs leading-relaxed text-muted-foreground">
                 Оценка показывает полноту карточки. Даже с низкой оценкой задачу
                 можно опубликовать и уточнить вместе с командой.
               </p>
@@ -332,10 +380,10 @@ export function TaskEditor({
           <div className="space-y-2">
             <label
               htmlFor={`${id}-title`}
-              className="text-xs font-medium text-[#595667]"
+              className="text-sm font-semibold text-foreground"
             >
               Название задачи{" "}
-              <span className="text-[#7461cd]" aria-hidden="true">
+              <span className="text-primary" aria-hidden="true">
                 *
               </span>
             </label>
@@ -348,13 +396,13 @@ export function TaskEditor({
               required
               aria-invalid={Boolean(errors.title)}
               aria-describedby={errors.title ? `${id}-title-error` : undefined}
-              className="h-10 border-[#e6e3ed] text-sm"
+              className="h-10 border-input text-sm"
             />
             {errors.title ? (
               <p
                 id={`${id}-title-error`}
                 role="alert"
-                className="text-xs text-red-600"
+                className="text-xs text-destructive"
               >
                 {errors.title}
               </p>
@@ -364,7 +412,7 @@ export function TaskEditor({
             <div className="space-y-2">
               <label
                 htmlFor={`${id}-company`}
-                className="text-xs font-medium text-[#595667]"
+                className="text-sm font-semibold text-foreground"
               >
                 Компания
               </label>
@@ -375,13 +423,13 @@ export function TaskEditor({
                   updateDetails("company", event.target.value)
                 }
                 placeholder="Название компании"
-                className="h-10 border-[#e6e3ed] text-sm"
+                className="h-10 border-input text-sm"
               />
             </div>
             <div className="space-y-2">
               <label
                 htmlFor={`${id}-industry`}
-                className="text-xs font-medium text-[#595667]"
+                className="text-sm font-semibold text-foreground"
               >
                 Отрасль
               </label>
@@ -392,13 +440,13 @@ export function TaskEditor({
                   updateDetails("industry", event.target.value)
                 }
                 placeholder="Например, ритейл"
-                className="h-10 border-[#e6e3ed] text-sm"
+                className="h-10 border-input text-sm"
               />
             </div>
           </div>
         </div>
 
-        <div className="space-y-5 border-t border-[#eeecf3] pt-5">
+        <div className="space-y-5 border-t border-border pt-5">
           {TASK_FIELDS.map((field, index) => {
             const filled = Boolean(draft.fields[field.key].trim());
             const confirmed =
@@ -411,10 +459,10 @@ export function TaskEditor({
                 <div className="flex items-center justify-between gap-3">
                   <label
                     htmlFor={`${id}-${field.key}`}
-                    className="text-sm font-medium text-[#343145]"
+                    className="text-sm font-semibold text-foreground"
                   >
                     <span
-                      className="mr-2.5 text-[11px] font-normal tabular-nums text-[#b1acbf]"
+                      className="mr-2.5 text-xs font-medium tabular-nums text-muted-foreground"
                       aria-hidden="true"
                     >
                       {String(index + 1).padStart(2, "0")}
@@ -423,13 +471,10 @@ export function TaskEditor({
                   </label>
                   <span
                     className={cn(
-                      "flex shrink-0 items-center gap-1 text-[11px] tabular-nums",
-                      confirmed ? "text-[#7461cd]" : "text-[#a6a0b3]",
+                      "shrink-0 text-xs font-medium tabular-nums",
+                      confirmed ? "text-primary" : "text-muted-foreground",
                     )}
                   >
-                    {confirmed ? (
-                      <Check className="size-3" aria-hidden="true" />
-                    ) : null}
                     {confirmed ? field.weight : 0} / {field.weight}
                   </span>
                 </div>
@@ -444,13 +489,13 @@ export function TaskEditor({
                   rows={field.key === "need" || field.key === "context" ? 3 : 2}
                   aria-invalid={invalid}
                   aria-describedby={invalid ? `${id}-need-error` : undefined}
-                  className="min-h-20 resize-y border-[#e6e3ed] text-sm leading-relaxed placeholder:text-[#aaa5b4]"
+                  className="min-h-20 resize-y border-input text-sm leading-relaxed placeholder:text-muted-foreground"
                 />
                 {field.key === "need" && errors.need ? (
                   <p
                     id={`${id}-need-error`}
                     role="alert"
-                    className="text-xs text-red-600"
+                    className="text-xs text-destructive"
                   >
                     {errors.need}
                   </p>
@@ -460,7 +505,7 @@ export function TaskEditor({
           })}
         </div>
 
-        <div className="flex items-start gap-3 rounded-xl bg-[#f7f5fc] p-4">
+        <div className="flex items-start gap-3 border-t pt-5">
           <Checkbox
             ref={confirmationRef}
             id={`${id}-verified`}
@@ -474,18 +519,18 @@ export function TaskEditor({
             }}
             aria-invalid={Boolean(errors.confirmation)}
             aria-describedby={`${id}-confirmation-hint${errors.confirmation ? ` ${id}-confirmation-error` : ""}`}
-            className="mt-0.5 data-[state=checked]:border-[#7461cd] data-[state=checked]:bg-[#7461cd] data-[state=checked]:text-white"
+            className="mt-0.5 data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground"
           />
           <div>
             <label
               htmlFor={`${id}-verified`}
-              className="cursor-pointer text-sm font-medium leading-relaxed text-[#343145]"
+              className="cursor-pointer text-sm font-semibold leading-relaxed text-foreground"
             >
               Я проверил(а) текст карточки и подтверждаю заполненные поля
             </label>
             <p
               id={`${id}-confirmation-hint`}
-              className="mt-1.5 text-xs leading-relaxed text-[#858391]"
+              className="mt-1.5 text-xs leading-relaxed text-muted-foreground"
             >
               {verified
                 ? "Подтверждённые поля будут учтены в оценке после сохранения."
@@ -497,7 +542,7 @@ export function TaskEditor({
               <p
                 id={`${id}-confirmation-error`}
                 role="alert"
-                className="mt-2 text-xs text-red-600"
+                className="mt-2 text-xs text-destructive"
               >
                 {errors.confirmation}
               </p>
@@ -506,23 +551,24 @@ export function TaskEditor({
         </div>
       </div>
 
-      <footer className="sticky bottom-0 z-10 mt-auto flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-[#eae7f1] bg-white/95 px-5 py-4 backdrop-blur-sm sm:px-7">
+      <footer className="sticky bottom-0 z-10 mt-auto flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border bg-card/95 px-5 py-4 backdrop-blur-sm sm:px-7">
+        {error && <p role="alert" className="w-full text-sm text-destructive">{error}</p>}
+        {pending && <p role="status" className="w-full text-sm text-muted-foreground">Сохраняем карточку…</p>}
         {onCancel ? (
           <Button
             type="button"
             variant="ghost"
             onClick={onCancel}
-            className="mr-auto text-xs text-[#858391]"
+            className="mr-auto h-10 text-[13px] font-semibold text-muted-foreground"
           >
-            Отмена
+            Закрыть
           </Button>
         ) : null}
         {isPublished ? (
           <Button
             type="submit"
-            className="h-9 bg-[#7461cd] px-3 text-xs text-white hover:bg-[#6552bd]"
+            className="h-10 bg-primary px-4 text-[13px] font-semibold text-primary-foreground hover:bg-primary/90"
           >
-            <Check className="size-3.5" aria-hidden="true" />
             Подтвердить изменения
           </Button>
         ) : (
@@ -530,22 +576,21 @@ export function TaskEditor({
             <Button
               type="submit"
               variant="outline"
-              className="h-9 border-[#e6e3ed] px-3 text-xs text-[#595667]"
+              className="h-10 border-input px-4 text-[13px] font-semibold text-foreground"
             >
-              <Save className="size-3.5" aria-hidden="true" />
               Сохранить карточку
             </Button>
             <Button
               type="button"
               onClick={() => save(true)}
-              className="h-9 bg-[#7461cd] px-3 text-xs text-white hover:bg-[#6552bd]"
+              className="h-10 bg-primary px-4 text-[13px] font-semibold text-primary-foreground hover:bg-primary/90"
             >
               Подтвердить и опубликовать
-              <ArrowUpRight className="size-3.5" aria-hidden="true" />
             </Button>
           </>
         )}
       </footer>
+      </fieldset>
     </form>
   );
 }
