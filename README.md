@@ -159,5 +159,5 @@ MASTRA_CHAT_AGENT_ID=grillAgent
 
 ## Документация
 
-[Быстрый старт](QUICKSTART.md) · [Архитектура](docs/ARCHITECTURE.md) ·
+[Быстрый старт](QUICKSTART.md) · [Деплой](docs/DEPLOYMENT.md) · [Архитектура](docs/ARCHITECTURE.md) ·
 [Требования MVP](docs/TASK_MATCH_MVP_SPEC.md) · [Архитектурные решения](docs/adr/README.md)
