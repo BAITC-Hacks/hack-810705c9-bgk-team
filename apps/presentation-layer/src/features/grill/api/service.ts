@@ -22,11 +22,9 @@ import type {
 
 type GrillTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-export class GrillApiError extends Error {
-  constructor(readonly status: number, readonly code: string, message: string) {
-    super(message);
-  }
-}
+export { ApiError as GrillApiError } from '@/shared/api/errors';
+import { ApiError as GrillApiError } from '@/shared/api/errors';
+import { requireTaskOwner } from '@/features/task-card/api/access';
 
 const nodeBlocks: Record<string, string> = {
   'context.current': 'context', 'context.size': 'context', 'context.change': 'context',
@@ -213,6 +211,7 @@ async function advanceVersion(tx: GrillTx, session: typeof grillSession.$inferSe
 }
 
 export async function getGrill(taskId: string) {
+  await requireTaskOwner(taskId);
   return db.transaction(async (tx) => {
     const [session] = await tx.select().from(grillSession).where(eq(grillSession.taskId, taskId)).limit(1);
     if (!session) throw new GrillApiError(404, 'GRILL_NOT_FOUND', 'Сессия прожарки не найдена.');
@@ -225,6 +224,7 @@ export async function getGrill(taskId: string) {
 }
 
 export async function createGrill(taskId: string, input: CreateGrillInput) {
+  await requireTaskOwner(taskId);
   return db.transaction(async (tx) => {
     const [existing] = await tx.select({ id: grillSession.id }).from(grillSession).where(eq(grillSession.taskId, taskId)).limit(1);
     if (existing) throw new GrillApiError(409, 'GRILL_EXISTS', 'Прожарка для этой задачи уже создана.');
@@ -239,6 +239,7 @@ export async function createGrill(taskId: string, input: CreateGrillInput) {
 }
 
 export async function submitTurn(taskId: string, input: SubmitGrillTurnInput) {
+  await requireTaskOwner(taskId);
   return db.transaction(async (tx) => {
     const session = await guardedSession(tx, taskId, input.sessionVersion);
     if (session.draftCheckpointState !== 'confirmed') throw new GrillApiError(409, 'DRAFT_CHECKPOINT_REQUIRED', 'Сначала подтвердите сводку черновика.');
@@ -287,6 +288,7 @@ export async function submitTurn(taskId: string, input: SubmitGrillTurnInput) {
 }
 
 export async function checkpoint(taskId: string, input: GrillCheckpointInput) {
+  await requireTaskOwner(taskId);
   return db.transaction(async (tx) => {
     const session = await guardedSession(tx, taskId, input.sessionVersion);
     if (session.currentBlock !== input.block) throw new GrillApiError(409, 'CHECKPOINT_MISMATCH', 'Этот блок сейчас нельзя подтвердить.');
@@ -332,6 +334,7 @@ export async function checkpoint(taskId: string, input: GrillCheckpointInput) {
 }
 
 export async function patchField(taskId: string, node: string, input: EditGrillFieldInput) {
+  await requireTaskOwner(taskId);
   return db.transaction(async (tx) => {
     const session = await guardedSession(tx, taskId, input.sessionVersion);
     const [row] = await tx.select().from(taskField).where(and(eq(taskField.taskId, taskId), eq(taskField.node, node))).limit(1);
@@ -385,6 +388,7 @@ export async function patchField(taskId: string, node: string, input: EditGrillF
 }
 
 export async function finishGrill(taskId: string, sessionVersion: number) {
+  await requireTaskOwner(taskId);
   return db.transaction(async (tx) => {
     const session = await guardedSession(tx, taskId, sessionVersion);
     const [updated] = await tx.update(grillSession).set({ status: 'finished', currentNode: null, currentBlock: null,

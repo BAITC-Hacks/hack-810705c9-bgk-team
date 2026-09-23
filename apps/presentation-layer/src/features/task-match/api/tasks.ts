@@ -1,5 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { taskAccess, toExecutorView, visibleProposals } from '@/entities/access';
+import { requireTaskOwner } from '@/features/task-card/api/access';
 import { getDemoActor } from '@/shared/api/actor';
 import { db } from '@/shared/db';
 import { aiLogs, grillSessions, grillTurns, taskFields, tasks } from '@/shared/db/schema';
@@ -51,16 +53,25 @@ async function taskView(row: TaskRow) {
 }
 
 export async function listTasks() {
+  const actor = await getDemoActor();
   const rows = await db.select().from(tasks).orderBy(desc(tasks.createdAt));
-  const views = await Promise.all(rows.map(taskView));
+  const all = await allProposals();
+  const allowed = rows.filter(row => taskAccess(actor, { ...row, fields: [] }, all));
+  const views = await Promise.all(allowed.map(async row => {
+    if (actor.role === 'business' && actor.businessId === row.businessId) return taskView(row);
+    const fields = await db.select().from(taskFields).where(eq(taskFields.taskId, row.id));
+    const visible = toExecutorView({ ...row, fields });
+    return projectWorkspaceTask({ ...row, description: '' }, fields.filter(f => visible.fields.some(v => v.node === f.node)));
+  }));
   const sessions = await db.select().from(grillSessions);
   const questions: Record<string, NonNullable<ReturnType<typeof question>>> = {};
   for (const session of sessions) {
+    if (actor.role !== 'business' || !allowed.some(row => row.id === session.taskId && row.businessId === actor.businessId)) continue;
     if (session.status !== 'active' || !session.currentNode || !isNode(session.currentNode)) continue;
     const last = await db.select().from(grillTurns).where(eq(grillTurns.sessionId, session.id)).orderBy(desc(grillTurns.createdAt)).limit(1);
     questions[session.taskId] = question(session.currentNode, last[0]?.question)!;
   }
-  return { tasks: views, questions, proposals: await allProposals() };
+  return { tasks: views, questions, proposals: visibleProposals(actor, all, rows) };
 }
 
 
@@ -100,6 +111,7 @@ export async function answerGrillTurn(taskId: string, input: unknown) {
 }
 
 export async function updateTask(taskId: string, input: unknown) {
+  await requireTaskOwner(taskId);
   const parsed = patchSchema.parse(input);
   const patch = parsed.task ?? parsed;
   const [row] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1);
@@ -121,6 +133,7 @@ export async function updateTask(taskId: string, input: unknown) {
 export { getScore as getTaskScore } from '@/features/task-card/api/get-score';
 
 export async function publishTask(taskId: string) {
+  await requireTaskOwner(taskId);
   await db.transaction(async tx => {
     const [row] = await tx.update(tasks).set({ status: 'published', publishedAt: new Date(), updatedAt: new Date() }).where(and(eq(tasks.id, taskId), eq(tasks.status, 'draft'))).returning();
     if (!row) throw new ApiError(409, 'INVALID_STATE', 'Задачу нельзя опубликовать');

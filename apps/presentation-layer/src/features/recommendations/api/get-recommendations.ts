@@ -1,3 +1,5 @@
+import { requireDemoActor } from '@/shared/lib/demo-actor.server';
+import { ForbiddenError } from '@/shared/lib/demo-actor';
 // ADR-006 п. 2: единый набор рекомендаций для колоды и сетки.
 // SQL отбирает кандидатов, fit и порядок FR-5.4 считаются в коде.
 import { and, count, eq, gte, inArray, notExists, sql } from 'drizzle-orm';
@@ -22,6 +24,8 @@ const ALLOWED_ENGAGEMENTS: Record<Engagement, Engagement[]> = {
 export async function getRecommendations(
   teamId: string,
 ): Promise<RecommendationsResponse | null> {
+  const actor = await requireDemoActor();
+  if (actor.role !== 'team' || actor.teamId !== teamId) throw new ForbiddenError('Выберите свою команду');
   const [team] = await db.select().from(teams).where(eq(teams.id, teamId));
   if (!team) return null;
   const profile: TeamProfile = team;

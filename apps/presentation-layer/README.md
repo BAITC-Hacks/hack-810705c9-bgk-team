@@ -14,6 +14,34 @@
 
 Все изменения живут в памяти вкладки. Обновление страницы или «Демо → Начать демо заново» возвращает исходные данные. В демо есть 6 опубликованных задач, 6 черновиков, 6 команд и 7 откликов; компании, участники и сведения вымышлены. Ссылки на прототипы в исходных данных ведут на `example.com` и служат примерами.
 
+## Демо-роли и доступ (ADR-008)
+
+**Демо-режим, без аутентификации.** Регистрации и паролей нет. Переключатель в левом нижнем углу выбирает роль (бизнес или команда), конкретного участника из seed (5 демо-бизнесов по одному на seed-карточку, 5 команд: BotForge, DataBrew, PixelUX, WebCraft, QAstra) и вид рекомендаций. Выбор хранится в cookie и сохраняется после перезагрузки:
+
+| Cookie | Значения | Флаги |
+| --- | --- | --- |
+| `tm_role` | `business` \| `team` | `httpOnly`, `sameSite=lax`, `path=/` |
+| `tm_actor` | id бизнеса или команды из `src/shared/config/demo-actors.ts` | `httpOnly`, `sameSite=lax`, `path=/` |
+| `tm_view` | `deck` \| `grid` | `sameSite=lax`, `path=/`, без `httpOnly` (как `setViewMode` в ADR-006) |
+
+Cookie можно подделать, поэтому проверки роли и владения в use-case (`403`) защищают сценарий от ошибок UI, а не от злоумышленника. **Не разворачивайте приложение за пределами локального демо без замены механизма.**
+
+Где код: `src/shared/lib/demo-actor.ts` (разбор cookie, проверки владения, `403`), `src/shared/lib/demo-actor.server.ts` (`getDemoActor()`), `src/entities/access` (фильтры видимости и «Вид исполнителя»), `src/features/demo-role-switch` (переключатель), `src/features/demo-access` (use-case и in-memory заглушка вместо данных ADR-003/007).
+
+Проверка `403` (dev-сервер, id из `src/features/demo-access/api/repository.ts`):
+
+```sh
+TEAM='tm_role=team; tm_actor=7e3a0000-0000-4000-8000-000000000002'   # DataBrew
+curl -i -X POST -b "$TEAM" localhost:3000/api/proposals/demo-proposal-pixelux/decision -d '{"action":"accept"}'
+curl -i -X POST -b "$TEAM" localhost:3000/api/stages/demo-stage-botforge/claim
+curl -i -X POST -b "$TEAM" localhost:3000/api/stages/demo-stage-botforge-claimed/confirm
+curl -i -b "$TEAM" 'localhost:3000/api/ai-log?taskId=demo-task-delivery-bot'
+```
+
+Без валидных `tm_role` / `tm_actor` API отвечает `403` («Выберите демо-роль»), подстановки по умолчанию нет. На навигации по страницам `proxy.ts` сам ставит первого демо-бизнеса, поэтому UI и сервер видят одну роль.
+
+Переключатель «Бизнес / Студент» рабочего пространства берёт начальную роль из cookie и следует за переключателем демо-роли. Обратного направления нет: переключение внутри страницы меняет только её локальное состояние и не пишет cookie.
+
 ## Запуск
 
 Нужны Bun 1.4.2 и Node.js >=24. Из корня репозитория:

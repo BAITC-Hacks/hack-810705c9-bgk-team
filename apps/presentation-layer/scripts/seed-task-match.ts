@@ -1,12 +1,13 @@
 // Идемпотентный seed ADR-006: команды и задачи с фиксированными id.
 // Запуск: DATABASE_URL_NEXTJS=… bun run db:seed:task-match
+import { DEMO_BUSINESSES } from '../src/shared/config/demo-actors';
 import { sql } from 'drizzle-orm';
 import { db } from '../src/shared/db';
 import { businesses, tasks, teams } from '../src/shared/db/schema';
 import { SEED_TASKS, SEED_TEAMS } from '../src/shared/db/seed/task-match-seed';
 
 async function main() {
-  await db.insert(businesses).values({ id: "business-logistics", name: "Демо бизнес" }).onConflictDoNothing();
+  await db.insert(businesses).values(DEMO_BUSINESSES.map(b => ({ ...b }))).onConflictDoNothing();
   await db
     .insert(teams)
     .values(
@@ -39,7 +40,7 @@ async function main() {
         id: t.id,
         title: t.title,
         description: t.title,
-        businessId: "business-logistics",
+        businessId: DEMO_BUSINESSES[0].id,
         company: t.company,
         topic: t.topic,
         status: t.status,

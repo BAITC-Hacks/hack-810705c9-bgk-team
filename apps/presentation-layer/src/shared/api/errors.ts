@@ -1,3 +1,4 @@
+import { ForbiddenError } from '@/shared/lib/demo-actor';
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 
@@ -25,6 +26,7 @@ export class ApiError extends Error {
 }
 
 export function toResponse(err: unknown): NextResponse {
+  if (err instanceof ForbiddenError) return NextResponse.json({ error: { code: "forbidden", message: err.message } }, { status: 403 });
   if (err instanceof ApiError) {
     return NextResponse.json(
       { error: { code: err.code, message: err.message, ...(err.details !== undefined ? { details: err.details } : {}) } },

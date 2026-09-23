@@ -1,3 +1,5 @@
+import { requireDemoActor } from '@/shared/lib/demo-actor.server';
+import { ForbiddenError } from '@/shared/lib/demo-actor';
 // ADR-006 п. 4: свайпы пишутся только в `swipe`. `task` и рейтинг не меняются (T-11).
 import { and, count, eq } from 'drizzle-orm';
 import type {
@@ -9,6 +11,8 @@ import { db } from '@/shared/db';
 import { swipes, tasks, teams } from '@/shared/db/schema';
 
 export async function recordSwipe(input: SwipeRequest): Promise<SwipeResponse> {
+  const actor = await requireDemoActor();
+  if (actor.role !== 'team' || actor.teamId !== input.teamId) throw new ForbiddenError('Выберите свою команду');
   const [team] = await db
     .select({ id: teams.id })
     .from(teams)
