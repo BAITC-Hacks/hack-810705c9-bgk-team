@@ -3,18 +3,30 @@
 import {
   ActionBarPrimitive,
   MessagePrimitive,
+  useAuiState,
   type TextMessagePartComponent,
 } from "@assistant-ui/react";
-import { Copy, CopyCheck } from "@gravity-ui/icons";
+import { Copy, CopyCheck, FileText } from "@gravity-ui/icons";
 import { MessageResponse } from "@/shared/components/ai-elements/message";
 import { Shimmer } from "@/shared/components/ai-elements/shimmer";
 
 export function UserMessage() {
+  const hasText = useAuiState((state) => state.message.content.some((part) => part.type === "text" && part.text.trim().length > 0));
   return (
-    <MessagePrimitive.Root className="workspace-enter flex justify-end">
-      <div className="max-w-[85%] rounded-2xl bg-secondary px-5 py-4 text-[15px] leading-[1.7] whitespace-pre-wrap">
-        <MessagePrimitive.Parts />
-      </div>
+    <MessagePrimitive.Root className="workspace-enter flex flex-col items-end gap-2">
+      <MessagePrimitive.Attachments>
+        {({ attachment }) => (
+          <span className="inline-flex max-w-64 items-center gap-2 rounded-xl border bg-card px-3 py-2 text-xs font-semibold">
+            <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span className="truncate">{attachment.name}</span>
+          </span>
+        )}
+      </MessagePrimitive.Attachments>
+      {hasText && (
+        <div className="max-w-[85%] rounded-2xl bg-secondary px-5 py-4 text-[15px] leading-[1.7] whitespace-pre-wrap">
+          <MessagePrimitive.Parts />
+        </div>
+      )}
     </MessagePrimitive.Root>
   );
 }

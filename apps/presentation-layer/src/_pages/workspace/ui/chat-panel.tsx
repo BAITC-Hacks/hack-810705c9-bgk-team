@@ -22,7 +22,9 @@ import {
   Xmark,
 } from "@gravity-ui/icons";
 import {
+  CHAT_ATTACHMENT_LIMIT,
   TASK_FIELDS,
+  type ChatAttachment,
   type Message,
   type Task,
   type TaskField,
@@ -43,18 +45,20 @@ import {
   removeMention,
   type ChatSkillId,
 } from "./chat-skills";
+import { Spinner } from "@/shared/components/ui/spinner";
 import { AssistantAvatar, AssistantMessage, UserMessage } from "./chat-messages";
+import { CHAT_ATTACHMENT_ACCEPT, useChatAttachments } from "./use-chat-attachments";
 import { analyzeTaskLocally } from "./local-ai-analysis";
 import { useAsyncAction } from "@/shared/hooks/use-async-action";
 
 type Props = {
   task: Task;
   messages: Message[];
-  onSend: (text: string, field?: TaskField, skill?: ChatSkillId) => void | Promise<void>;
+  onSend: (text: string, field?: TaskField, skill?: ChatSkillId, attachments?: ChatAttachment[]) => void | Promise<void>;
+  onAddDocuments: (files: File[]) => void;
   onEdit: () => void;
   onShowProposals: () => void;
   onShowShortcuts: () => void;
-  documents: { id: string; name: string }[];
   onShowDocuments: () => void;
 };
 
@@ -85,12 +89,28 @@ const CHAT_OPTIONS = [
 
 type ChatOption = (typeof CHAT_OPTIONS)[number];
 
-type Submit = (text: string, field?: TaskField, skill?: ChatSkillId) => Promise<boolean>;
+type Submit = (
+  text: string,
+  field?: TaskField,
+  skill?: ChatSkillId,
+  attachments?: ChatAttachment[],
+) => Promise<boolean>;
 
 const PENDING_MESSAGE_ID = "pending-user-message";
 
 function convertMessage(message: Message): ThreadMessageLike {
-  return { id: message.id, role: message.role, content: message.content };
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    attachments: message.attachments?.map((attachment, index) => ({
+      id: `${message.id}-attachment-${index}`,
+      type: "document",
+      name: attachment.name,
+      status: { type: "complete" },
+      content: [],
+    })),
+  };
 }
 
 function appendedText(message: AppendMessage) {
@@ -104,21 +124,24 @@ function appendedText(message: AppendMessage) {
 export function ChatPanel(props: Props) {
   const { messages, onSend } = props;
   const { pending, error, run } = useAsyncAction();
-  const [pendingText, setPendingText] = useState<string | null>(null);
+  const [pendingMessage, setPendingMessage] = useState<Message | null>(null);
   const threadMessages = useMemo(
-    () => pending && pendingText !== null
-      ? [...messages, { id: PENDING_MESSAGE_ID, role: "user" as const, content: pendingText }]
-      : messages,
-    [messages, pending, pendingText],
+    () => pending && pendingMessage ? [...messages, pendingMessage] : messages,
+    [messages, pending, pendingMessage],
   );
 
-  const submit = useCallback<Submit>(async (text, field, skill) => {
+  const submit = useCallback<Submit>(async (text, field, skill, attachments) => {
     const skillLabel = CHAT_SKILLS.find((item) => item.id === skill)?.label;
-    setPendingText(skill ? `@${skillLabel}${text ? `\n${text}` : ""}` : text);
+    setPendingMessage({
+      id: PENDING_MESSAGE_ID,
+      role: "user",
+      content: skill ? `@${skillLabel}${text ? `\n${text}` : ""}` : text,
+      ...(attachments?.length ? { attachments } : {}),
+    });
     try {
-      return await run(() => onSend(text, field, skill));
+      return await run(() => onSend(text, field, skill, attachments));
     } finally {
-      setPendingText(null);
+      setPendingMessage(null);
     }
   }, [onSend, run]);
 
@@ -143,8 +166,8 @@ function ChatThread({
   onEdit,
   onShowProposals,
   onShowShortcuts,
-  documents,
   onShowDocuments,
+  onAddDocuments,
   pending,
   error,
   submit,
@@ -153,6 +176,9 @@ function ChatThread({
   const input = useAuiState((state) => state.composer.text);
   const setInput = useCallback((text: string) => aui.composer.setText(text), [aui]);
   const composerBusy = pending;
+  const files = useChatAttachments(task.id);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
   const [answerField, setAnswerField] = useState<TaskField | undefined>();
   const [selectedSkill, setSelectedSkill] = useState<ChatSkillId | undefined>();
   const [menuMode, setMenuMode] = useState<"mention" | "manual" | null>(null);
@@ -203,8 +229,19 @@ function ChatThread({
       ?.scrollIntoView({ block: "nearest" });
   }, [activeOptionId, menuOpen]);
 
+  const hasFiles = files.items.length > 0;
+  const filesLockedReason = "Сообщение с файлами отправляется помощнику целиком. Уберите файлы, чтобы ответить на вопрос или выбрать навык.";
+
+  function attachFiles(list: FileList | File[] | null | undefined) {
+    const picked = Array.from(list ?? []);
+    if (!picked.length || composerBusy || selectedSkill || answerField) return;
+    const accepted = files.add(picked);
+    // Chat files also appear in the task's documents panel.
+    if (accepted.length) onAddDocuments(accepted);
+  }
+
   function pickOption(option: ChatOption) {
-    if (composerBusy) return;
+    if (composerBusy || (option.kind === "skill" && hasFiles)) return;
     const updatedInput =
       mention && menuMode === "mention" ? removeMention(input, mention) : input;
     const nextCaret = mention && menuMode === "mention" ? mention.start : caret;
@@ -225,25 +262,31 @@ function ChatThread({
     });
   }
 
+  const canSend = !composerBusy && !files.reading && !files.failed
+    && (!!input.trim() || !!selectedSkill || files.attachments.length > 0);
+
   async function send() {
-    if (composerBusy) return;
-    const draft = { text: input, field: answerField, skill: selectedSkill };
-    if (!draft.text.trim() && !draft.skill) return;
+    if (!canSend) return;
+    const draft = { text: input, field: answerField, skill: selectedSkill, files: files.items };
+    const attachments = files.attachments;
     // Clear optimistically like a chat; restore the draft if the turn fails.
     setInput("");
     setAnswerField(undefined);
     setSelectedSkill(undefined);
     setMenuMode(null);
     setCaret(0);
+    files.reset();
     const sent = await submit(
       draft.text.trim(),
       draft.skill ? undefined : draft.field,
       draft.skill,
+      attachments.length ? attachments : undefined,
     );
     if (!sent) {
       setInput(draft.text);
       setAnswerField(draft.field);
       setSelectedSkill(draft.skill);
+      files.reset(draft.files);
     }
     requestAnimationFrame(() => inputRef.current?.focus());
   }
@@ -274,7 +317,7 @@ function ChatThread({
                     <DialogHeader className="pr-7">
                       <DialogTitle className="font-semibold">Как работает помощник</DialogTitle>
                       <DialogDescription>
-                        Помощник находит пустые поля и предлагает уточняющие вопросы. Ответы сохраняются без изменений, а сведения подтверждаете вы. Прикреплённые документы пока не анализируются.
+                        Помощник находит пустые поля и предлагает уточняющие вопросы. Ответы сохраняются без изменений, а сведения подтверждаете вы. Текст прикреплённых к сообщению файлов (до 10 000 символов из каждого) передаётся помощнику вместе с вопросом.
                       </DialogDescription>
                     </DialogHeader>
                     <details className="space-y-3 rounded-lg border p-3">
@@ -313,7 +356,7 @@ function ChatThread({
               </p>
               <div className="mt-4 rounded-lg border p-3">
                 <p className="mb-2 text-xs leading-relaxed text-muted-foreground">
-                  Здесь доступны локальные подсказки и диктовка. Прожарка с сохранением сессии,
+                  Здесь доступны локальные подсказки и файлы к сообщению. Прожарка с сохранением сессии,
                   подтверждением полей и критериев открывается отдельно.
                 </p>
                 <Button asChild size="sm" variant="outline">
@@ -327,7 +370,8 @@ function ChatThread({
                       <button
                         type="button"
                         key={question.field}
-                        disabled={composerBusy}
+                        disabled={composerBusy || hasFiles}
+                        title={hasFiles ? filesLockedReason : undefined}
                         aria-pressed={answerField === question.field}
                         onClick={() => {
                           setAnswerField(question.field);
@@ -390,7 +434,27 @@ function ChatThread({
             event.preventDefault();
             send();
           }}
-          className="relative rounded-2xl border border-input bg-card p-3.5 shadow-[0_2px_8px_#00000006] transition-shadow focus-within:border-primary/45 focus-within:shadow-[0_2px_12px_#0000000a] focus-within:ring-2 focus-within:ring-primary/5"
+          onDragOver={(event) => {
+            if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+            event.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
+          }}
+          onDrop={(event) => {
+            if (!event.dataTransfer.files.length) return;
+            event.preventDefault();
+            setDragging(false);
+            attachFiles(event.dataTransfer.files);
+          }}
+          onPaste={(event) => {
+            if (!event.clipboardData.files.length) return;
+            event.preventDefault();
+            attachFiles(event.clipboardData.files);
+          }}
+          data-dragging={dragging || undefined}
+          className="relative rounded-2xl border border-input bg-card p-3.5 data-dragging:border-dashed data-dragging:border-primary data-dragging:bg-workspace-selected shadow-[0_2px_8px_#00000006] transition-shadow focus-within:border-primary/45 focus-within:shadow-[0_2px_12px_#0000000a] focus-within:ring-2 focus-within:ring-primary/5"
         >
           {menuOpen && (
             <div className="absolute right-0 bottom-[calc(100%+8px)] left-0 z-30 overflow-hidden rounded-xl border bg-popover p-1.5 shadow-[0_8px_32px_#00000016]">
@@ -413,7 +477,8 @@ function ChatThread({
                     <button
                       type="button"
                       key={option.id}
-                      disabled={composerBusy}
+                      disabled={composerBusy || (option.kind === "skill" && hasFiles)}
+                      title={option.kind === "skill" && hasFiles ? filesLockedReason : undefined}
                       id={`${menuId}-${option.id}`}
                       role="option"
                       aria-selected={activeIndex === index}
@@ -462,21 +527,49 @@ function ChatThread({
               </div>
             </div>
           )}
-          {documents.length > 0 && (
-            <div className="mb-3 border-b pb-3">
-              <button type="button" onClick={onShowDocuments} className="mb-2 rounded text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50">
-                Документы задачи · {documents.length}
-              </button>
-              <div className="flex flex-wrap gap-1.5" aria-label="Прикреплённые документы">
-                {documents.slice(0, 3).map((document) => (
-                  <button key={document.id} type="button" title={document.name} onClick={onShowDocuments} className="inline-flex max-w-48 items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
-                    <Paperclip className="size-3 shrink-0" aria-hidden="true" />
-                    <span className="truncate">{document.name}</span>
+          {files.items.length > 0 && (
+            <ul className="mb-3 flex flex-wrap gap-2" aria-label="Файлы сообщения">
+              {files.items.map((item) => (
+                <li
+                  key={item.id}
+                  title={item.error ?? (item.result?.truncated ? "Файл длинный: помощник получит первые 10 000 символов." : item.file.name)}
+                  className={cn(
+                    "flex max-w-64 items-center gap-2 rounded-xl border py-1.5 pr-1 pl-2",
+                    item.status === "error" ? "border-destructive/40 bg-destructive/5" : "bg-muted/60",
+                  )}
+                >
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-background" aria-hidden="true">
+                    {item.status === "reading" ? <Spinner className="size-3.5" /> : <FileText className="size-3.5" />}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-semibold">{item.file.name}</span>
+                    <span className={cn("block truncate text-[11px]", item.status === "error" ? "text-destructive" : "text-muted-foreground")}>
+                      {item.status === "reading"
+                        ? "Читаю файл…"
+                        : item.status === "error"
+                          ? item.error
+                          : item.result?.truncated
+                            ? "Готово · первые 10 000 символов"
+                            : item.result?.text
+                              ? "Готово"
+                              : "Текст не найден"}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`Убрать файл ${item.file.name}`}
+                    disabled={composerBusy}
+                    onClick={() => files.remove(item.id)}
+                    className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
+                  >
+                    <Xmark className="size-3" />
                   </button>
-                ))}
-                {documents.length > 3 && <span className="px-1 py-1 text-xs text-muted-foreground">+{documents.length - 3}</span>}
-              </div>
-            </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          {files.notice && (
+            <p role="alert" className="mb-2 text-xs whitespace-pre-line text-destructive">{files.notice}</p>
           )}
           {skill && (
             <div className="mb-2 inline-flex max-w-full items-center gap-2 rounded-lg bg-workspace-selected py-1 pl-2.5 pr-1 text-xs font-semibold">
@@ -609,13 +702,27 @@ function ChatThread({
                 type="button"
                 variant="ghost"
                 size="icon"
-                aria-label="Прикрепить документы"
-                title="Документы задачи · Alt + 4"
-                onClick={onShowDocuments}
+                aria-label="Прикрепить файлы"
+                disabled={composerBusy || !!selectedSkill || !!answerField || files.items.length >= CHAT_ATTACHMENT_LIMIT}
+                title={selectedSkill || answerField
+                  ? "Файлы можно прикрепить к обычному сообщению"
+                  : "Прикрепить файлы · PDF, DOCX, XLSX, PPTX, RTF, TXT, MD, CSV · до 3 файлов по 10 МБ"}
+                onClick={() => fileInputRef.current?.click()}
                 className="size-8 rounded-lg text-muted-foreground hover:text-foreground"
               >
                 <Paperclip className="size-[18px]" />
               </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                hidden
+                accept={CHAT_ATTACHMENT_ACCEPT}
+                onChange={(event) => {
+                  attachFiles(event.currentTarget.files);
+                  event.currentTarget.value = "";
+                }}
+              />
               <Button
                 type="button"
                 variant="ghost"
@@ -637,7 +744,7 @@ function ChatThread({
                 size="icon"
                 type="submit"
                 aria-label="Отправить сообщение"
-                disabled={composerBusy || (!input.trim() && !selectedSkill)}
+                disabled={!canSend}
                 className="size-9 rounded-full disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
               >
                 <ArrowUp className="size-[18px]" />
