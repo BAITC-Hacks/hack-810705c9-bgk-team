@@ -17,6 +17,13 @@ export function proxy(request: NextRequest) {
     actor: request.cookies.get(ACTOR_COOKIE)?.value,
   };
   if (resolveDemoActor(values)) return NextResponse.next();
+  // Do not replace a newly onboarded business with a static demo business.
+  // The server resolves the matching profile against the business table.
+  try {
+    const session = JSON.parse(request.cookies.get("task-match-session")?.value ?? "null");
+    if (["business", "student"].includes(session?.role) && session.onboardingCompleted === false) return NextResponse.next();
+    if (values.role === "business" && session?.role === "business" && session.onboardingCompleted && typeof session.businessId === "string" && session.businessId === values.actor) return NextResponse.next();
+  } catch { /* Invalid session falls back to the demo identity. */ }
 
   const actor = parseDemoActor(values);
   const cookies = [

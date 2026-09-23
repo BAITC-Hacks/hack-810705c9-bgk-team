@@ -1,5 +1,6 @@
 import type { MilestoneSubmission, Proposal, Task, Team } from "./model";
-import type { WorkspaceSession, WorkspaceSnapshot } from "./contracts";
+import { prepareChatMessages, type ChatMessage } from "./chat-contracts";
+import type { OnboardingInput, WorkspaceSession, WorkspaceSnapshot } from "./contracts";
 export type { WorkspaceSession, WorkspaceSnapshot } from "./contracts";
 export { requestError } from "@/shared/lib/request-error";
 
@@ -26,7 +27,12 @@ async function request<T>(path: string, method = "GET", body?: unknown): Promise
 const key = encodeURIComponent;
 
 export const workspaceApi = {
+  chat: (taskId: string, messages: ChatMessage[]) =>
+    request<{ text: string }>(`/tasks/${key(taskId)}/chat`, "POST", { messages: prepareChatMessages(messages) }),
   load: () => request<WorkspaceSnapshot>("/workspace"),
+  getSession: () => request<WorkspaceSession>("/session"),
+  teams: () => request<Team[]>("/teams"),
+  onboard: (input: OnboardingInput) => request<WorkspaceSession>("/onboarding", "POST", input),
   session: (session: Partial<WorkspaceSession>) => request<WorkspaceSession>("/session", "PATCH", session),
   createTask: (description: string) => request<Task>("/workspace/tasks", "POST", { description }),
   saveTask: ({ id, title, company, industry, description, fields, confirmedFields, status, version }: Task) =>

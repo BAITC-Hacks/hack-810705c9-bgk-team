@@ -1,11 +1,11 @@
 /** Compatibility DTOs for the current main UI. Domain writes remain ADR-owned. */
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/shared/db";
-import { tasks, taskFields, teams, proposals, stages, scoreEvent, grillSession } from "@/shared/db/schema";
+import { businesses, tasks, taskFields, teams, proposals, stages, scoreEvent, grillSession } from "@/shared/db/schema";
 import { ApiError } from "@/shared/api/errors";
 import { getDemoActor } from "@/shared/api/actor";
 import { assertTaskOwner, isDemoTeamId } from "@/shared/lib/demo-actor";
-import { DEFAULT_DEMO_TEAM } from "@/shared/config/demo-actors";
+import { validateBusinessLogoKey } from "./business-logos";
 import { taskAccess, visibleProposals } from "@/entities/access";
 import { FIELD_NODES, projectWorkspaceTask } from "@/entities/task-match/projection";
 import { projectProposal } from "@/features/task-match/api/proposals";
@@ -16,7 +16,7 @@ import { decideProposal as canonicalDecision } from "@/features/decide-proposal"
 import { claimStage, confirmStage } from "@/features/stage-progress/api/stage-progress";
 import { listProposalStages, getKickoff as canonicalKickoff, getTeamProgress } from "@/features/stage-progress/api/queries";
 import type { Task, Proposal, Team } from "@/entities/workspace/model";
-import type { WorkspaceSession, TaskUpdate, TeamInput, MilestoneInput } from "@/entities/workspace/contracts";
+import type { WorkspaceSession, TaskUpdate, TeamInput, MilestoneInput, OnboardingInput, BusinessProfile } from "@/entities/workspace/contracts";
 
 type TaskRow = typeof tasks.$inferSelect;
 type FieldRow = typeof taskFields.$inferSelect;
@@ -41,19 +41,83 @@ function proposalDto(row: typeof proposals.$inferSelect, rows: (typeof stages.$i
   const first = own.find(s => s.status === "claimed") ?? own.find(s => s.status === "confirmed");
   return { ...projectProposal(row, own.some(s => s.status === "confirmed")), points: own.reduce((sum,s) => sum+s.points,0), ...(first?.reportUrl ? { milestone: { title: first.metric, resultUrl: first.reportUrl, comment: first.teamComment ?? "" } } : {}) };
 }
-export async function resolveSession(input: WorkspaceSession): Promise<WorkspaceSession> {
-  const actor = await getDemoActor();
-  return { role: actor.role === "team" ? "student" : "business", teamId: actor.role === "team" ? actor.teamId : isDemoTeamId(input.teamId) ? input.teamId : DEFAULT_DEMO_TEAM.id };
+export async function resolveSession(
+  input: WorkspaceSession,
+): Promise<WorkspaceSession> {
+  const business = input.businessId
+    ? await db.query.businesses.findFirst({ where: eq(businesses.id, input.businessId) })
+    : null;
+  const team = input.teamId
+    ? await db.query.teams.findFirst({ where: eq(teams.id, input.teamId) })
+    : null;
+  return {
+    ...input,
+    businessId: business?.id ?? null,
+    // A team is a deliberate choice. A business profile must not silently
+    // select the first team and then bypass student onboarding on a role switch.
+    teamId: team?.id ?? null,
+    onboardingCompleted: input.role === "business" ? Boolean(business) : Boolean(team),
+  };
 }
 export async function validateSessionTeam(teamId: string) {
   if (!isDemoTeamId(teamId)) throw new ApiError(403, "forbidden", "Выберите демо-команду");
   const [row] = await db.select({ id: teams.id }).from(teams).where(eq(teams.id,teamId));
   if (!row) throw new ApiError(404,"TEAM_NOT_FOUND","Команда не найдена");
 }
+export async function listTeams(): Promise<Team[]> {
+  return (await db.query.teams.findMany({
+    orderBy: [asc(teams.createdAt), asc(teams.id)],
+  })).map(teamDto);
+}
+export async function completeOnboarding(
+  input: OnboardingInput,
+  session: WorkspaceSession,
+): Promise<WorkspaceSession> {
+  if (input.role === "student") {
+    await validateSessionTeam(input.teamId);
+    return { ...session, role: "student", teamId: input.teamId, onboardingCompleted: true };
+  }
+  if (input.logoKey) await validateBusinessLogoKey(input.logoKey);
+  const businessId = await db.transaction(async (tx) => {
+    const existing = session.businessId
+      ? await tx.query.businesses.findFirst({ where: eq(businesses.id, session.businessId) })
+      : undefined;
+    if (existing) {
+      await tx.update(businesses).set({
+        name: input.companyName,
+        ...(input.logoKey === undefined ? {} : { logoKey: input.logoKey }),
+      }).where(eq(businesses.id, existing.id));
+      return existing.id;
+    }
+    const id = crypto.randomUUID();
+    await tx.insert(businesses).values({
+      id,
+      name: input.companyName,
+      industry: "Другое",
+      logoKey: input.logoKey ?? null,
+    });
+    return id;
+  });
+  return { ...session, role: "business", businessId, onboardingCompleted: true };
+}
+async function readBusinessProfile(
+  businessId: string | null | undefined,
+  reader: typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0],
+): Promise<BusinessProfile | null> {
+  if (!businessId) return null;
+  const business = await reader.query.businesses.findFirst({ where: eq(businesses.id, businessId) });
+  return business ? {
+    id: business.id,
+    name: business.name,
+    logoUrl: business.logoKey ? `/api/business-logos/${business.logoKey}` : null,
+  } : null;
+}
+
 export function requireRole(session: WorkspaceSession, role: WorkspaceSession["role"]) {
   if (session.role !== role) throw new ApiError(403,"forbidden","Действие недоступно для текущей роли");
 }
 export async function getWorkspace(session: WorkspaceSession) {
+  if (!session.onboardingCompleted) return { session, tasks: [], teams: await listTeams(), proposals: [], business: null };
   const actor = await getDemoActor();
   return db.transaction(async tx => {
     const taskRows = await tx.select().from(tasks).orderBy(desc(tasks.createdAt),asc(tasks.id));
@@ -62,7 +126,7 @@ export async function getWorkspace(session: WorkspaceSession) {
     const stageRows = await tx.select().from(stages);
     const teamRows = await tx.select().from(teams).orderBy(asc(teams.createdAt),asc(teams.id));
     const visible = taskRows.filter(t => taskAccess(actor,{...t,fields:[]},proposalRows));
-    return { session, tasks: visible.map(t => taskDto(t,fieldRows.filter(f => f.taskId === t.id),actor.role === "business" && actor.businessId === t.businessId)), teams: teamRows.filter(t => isDemoTeamId(t.id)).map(teamDto), proposals: visibleProposals(actor,proposalRows,taskRows).map(p => proposalDto(p,stageRows)) };
+    return { session, business: await readBusinessProfile(session.businessId,tx), tasks: visible.map(t => taskDto(t,fieldRows.filter(f => f.taskId === t.id),actor.role === "business" && actor.businessId === t.businessId)), teams: teamRows.filter(t => isDemoTeamId(t.id)).map(teamDto), proposals: visibleProposals(actor,proposalRows,taskRows).map(p => proposalDto(p,stageRows)) };
   }, { isolationLevel: "repeatable read", accessMode: "read only" });
 }
 export async function getTask(id: string, session: WorkspaceSession) {

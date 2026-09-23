@@ -129,7 +129,7 @@ function ProposalDetails({ proposal }: { proposal: Proposal }) {
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 rounded-sm font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
           >
-            Демо-прототип{" "}
+            Прототип{" "}
             <ArrowUpRight className="size-3.5" aria-hidden="true" />
             <span className="sr-only"> — откроется в новой вкладке</span>
           </a>

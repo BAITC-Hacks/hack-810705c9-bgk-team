@@ -19,8 +19,15 @@
     {
       "idx": 2,
       "version": "7",
-      "when": 1790162632250,
-      "tag": "20260923112352_task_match_integration",
+      "when": 1790162668273,
+      "tag": "20260923112428_onboarding_business_logo",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790163357420,
+      "tag": "20260923113557_task_match_integration",
       "breakpoints": true
     }
   ]

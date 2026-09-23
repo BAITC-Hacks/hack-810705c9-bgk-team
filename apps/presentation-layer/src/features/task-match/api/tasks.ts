@@ -5,7 +5,7 @@ import { requireTaskOwner } from '@/features/task-card/api/access';
 import { recalculateScore } from '@/features/task-card/api/recalculate-score';
 import { getDemoActor } from '@/shared/api/actor';
 import { db } from '@/shared/db';
-import { aiLogs, grillSessions, grillTurns, taskFields, tasks } from '@/shared/db/schema';
+import { businesses, aiLogs, grillSessions, grillTurns, taskFields, tasks } from '@/shared/db/schema';
 import { analyzeText } from '@/shared/api/mastra';
 import { fallbackQuestion, type NodeKey } from '@/entities/task-match';
 import { projectWorkspaceTask } from '@/entities/task-match';
@@ -90,10 +90,12 @@ export async function createTask(input: unknown) {
   const actor = await getDemoActor();
   if (actor.role !== 'business') throw new ApiError(403, 'forbidden', 'Только бизнес создаёт задачи');
   const { description } = descriptionSchema.parse(input);
+  const [business] = await db.select().from(businesses).where(eq(businesses.id,actor.businessId));
+  if (!business) throw new ApiError(403,'forbidden','Завершите профиль бизнеса');
   const analyzed = await analyzeText({ text: description, targetNodes: Object.values(workspaceNodes).flat(), dictionary: { roles: [], skills: [] } });
   const draftFields = Object.fromEntries((analyzed?.fields ?? []).filter(f => isNode(f.node)).map(f => [f.node, { value: f.value, sourceQuote: f.source_quote }]));
   const row = await db.transaction(async tx => {
-    const [row] = await tx.insert(tasks).values({ businessId: actor.businessId, title: description.split(/[\n.!?]/, 1)[0].slice(0,68), description }).returning();
+    const [row] = await tx.insert(tasks).values({ businessId: actor.businessId, company: business.name, topic: business.industry, title: description.split(/[\n.!?]/, 1)[0].slice(0,68), description }).returning();
     await createGrill(row.id, { draftText: description, draftFields }, tx);
     await tx.insert(aiLogs).values({ taskId: row.id, kind: 'analyze-text', agent: analyzed?.log.agent ?? 'fallback', input: { text: description }, parseOk: Boolean(analyzed), fallbackUsed: !analyzed });
     return row;

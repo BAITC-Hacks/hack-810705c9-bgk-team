@@ -7,6 +7,7 @@ import {
   FileText,
   Keyboard,
   Microphone,
+  Paperclip,
   Persons,
   StopFill,
   Xmark,
@@ -50,6 +51,8 @@ type Props = {
   onEdit: () => void;
   onShowProposals: () => void;
   onShowShortcuts: () => void;
+  documents: { id: string; name: string }[];
+  onShowDocuments: () => void;
 };
 
 const CHAT_OPTIONS = [
@@ -59,6 +62,13 @@ const CHAT_OPTIONS = [
     label: "Открыть карточку",
     description: "Проверить, изменить и подтвердить сведения",
     aliases: ["card", "edit", "карточка"],
+    kind: "action" as const,
+  },
+  {
+    id: "documents",
+    label: "Документы задачи",
+    description: "Добавить и просмотреть рабочие материалы",
+    aliases: ["docs", "files", "документы", "файлы"],
     kind: "action" as const,
   },
   {
@@ -79,6 +89,8 @@ export function ChatPanel({
   onEdit,
   onShowProposals,
   onShowShortcuts,
+  documents,
+  onShowDocuments,
 }: Props) {
   const [input, setInput] = useState("");
   const inputValueRef = useRef("");
@@ -160,6 +172,7 @@ export function ChatPanel({
     setMenuMode(null);
     if (option.kind === "action") {
       if (option.id === "card") onEdit();
+      else if (option.id === "documents") onShowDocuments();
       else onShowProposals();
       return;
     }
@@ -208,16 +221,19 @@ export function ChatPanel({
                 <Dialog onOpenChange={(open) => { if (!open) setSimulateMalformed(false); }}>
                   <DialogTrigger asChild>
                     <button type="button" disabled={voice.busy} className="rounded text-xs text-muted-foreground underline decoration-dotted underline-offset-4 hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50">
-                      Демо-ассистент
+                      О помощнике
                     </button>
                   </DialogTrigger>
                   <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
                     <DialogHeader className="pr-7">
-                      <DialogTitle className="font-semibold">Локальный демо-ассистент</DialogTitle>
+                      <DialogTitle className="font-semibold">Как работает помощник</DialogTitle>
                       <DialogDescription>
-                        Ответ формируется по шаблону и проверяется перед показом. Внешняя модель не вызывается. Здесь можно проверить формат и обработку ошибки.
+                        Помощник находит пустые поля и предлагает уточняющие вопросы. Ответы сохраняются без изменений, а сведения подтверждаете вы. Прикреплённые документы пока не анализируются.
                       </DialogDescription>
                     </DialogHeader>
+                    <details className="space-y-3 rounded-lg border p-3">
+                      <summary className="cursor-pointer text-sm font-semibold">Технические сведения</summary>
+                      <p className="text-xs leading-relaxed text-muted-foreground">Уточняющие вопросы и навыки используют локальные шаблоны. Свободные сообщения отправляются через сервер настроенному помощнику; если он недоступен, поле показывает ошибку и сохраняет ваш ввод.</p>
                     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted p-3">
                       <p role="status" className="text-sm font-medium">
                         {displayedAnalysis.fallbackUsed ? "Ошибка обработана · использованы безопасные вопросы" : "Ответ проверен · шаблон выполнен"}
@@ -236,6 +252,7 @@ export function ChatPanel({
                     <p className="text-xs leading-relaxed text-muted-foreground">
                       При неверном JSON, неизвестных полях или повторных вопросах ответ заменяется локальным шаблоном. Заполненные поля ждут подтверждения человека, а рейтинг пересчитывается сервером после подтверждения полей.
                     </p>
+                    </details>
                   </DialogContent>
                 </Dialog>
               </div>
@@ -378,6 +395,8 @@ export function ChatPanel({
                       >
                         {option.kind === "skill" ? (
                           <At className="size-4" />
+                        ) : option.id === "documents" ? (
+                          <Paperclip className="size-4" />
                         ) : option.id === "card" ? (
                           <FileText className="size-4" />
                         ) : (
@@ -403,6 +422,22 @@ export function ChatPanel({
                     «отклики».
                   </p>
                 )}
+              </div>
+            </div>
+          )}
+          {documents.length > 0 && (
+            <div className="mb-3 border-b pb-3">
+              <button type="button" onClick={onShowDocuments} disabled={voice.busy} className="mb-2 rounded text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50">
+                Документы задачи · {documents.length}
+              </button>
+              <div className="flex flex-wrap gap-1.5" aria-label="Прикреплённые документы">
+                {documents.slice(0, 3).map((document) => (
+                  <button key={document.id} type="button" title={document.name} onClick={onShowDocuments} disabled={voice.busy} className="inline-flex max-w-48 items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
+                    <Paperclip className="size-3 shrink-0" aria-hidden="true" />
+                    <span className="truncate">{document.name}</span>
+                  </button>
+                ))}
+                {documents.length > 3 && <span className="px-1 py-1 text-xs text-muted-foreground">+{documents.length - 3}</span>}
               </div>
             </div>
           )}
@@ -539,13 +574,13 @@ export function ChatPanel({
                 type="button"
                 variant="ghost"
                 size="icon"
-                aria-label="Открыть карточку задачи"
+                aria-label="Прикрепить документы"
                 disabled={voice.busy}
-                title="Карточка задачи"
-                onClick={onEdit}
+                title="Документы задачи · Alt + 4"
+                onClick={onShowDocuments}
                 className="size-8 rounded-lg text-muted-foreground hover:text-foreground"
               >
-                <FileText className="size-[18px]" />
+                <Paperclip className="size-[18px]" />
               </Button>
               <Button
                 type="button"
@@ -610,7 +645,7 @@ export function ChatPanel({
           )}
         </form>
         <p className="mt-2 text-center text-[11px] leading-normal text-muted-foreground">
-          Демо-ответы. Проверьте карточку перед публикацией.
+          Проверьте и подтвердите карточку перед публикацией.
         </p>
       </div>
     </div>

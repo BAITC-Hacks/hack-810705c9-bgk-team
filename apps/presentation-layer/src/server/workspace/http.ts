@@ -1,5 +1,4 @@
-import { ACTOR_COOKIE, ROLE_COOKIE, isDemoBusinessId, isDemoTeamId } from "@/shared/lib/demo-actor";
-import { DEFAULT_DEMO_BUSINESS } from "@/shared/config/demo-actors";
+import { ACTOR_COOKIE, ROLE_COOKIE, resolveDemoActor } from "@/shared/lib/demo-actor";
 import { ApiError } from "@/shared/api/errors";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
@@ -21,7 +20,7 @@ export type ApiContext = { params: Promise<Record<string, string>> };
 
 export async function getSession(): Promise<WorkspaceSession> {
   const value = (await cookies()).get(SESSION_COOKIE)?.value;
-  let session: WorkspaceSession = { role: "business", teamId: null };
+  let session: WorkspaceSession = sessionSchema.parse({ role: "business", teamId: null });
   if (value) {
     try {
       const parsed = sessionSchema.safeParse(JSON.parse(value));
@@ -30,17 +29,26 @@ export async function getSession(): Promise<WorkspaceSession> {
       /* A stale demo cookie resets to the documented demo identity. */
     }
   }
+  // A deliberate demo-actor switch also updates the workspace identity.
+  const jar = await cookies();
+  const demo = resolveDemoActor({ role: jar.get(ROLE_COOKIE)?.value, actor: jar.get(ACTOR_COOKIE)?.value });
+  if (value && demo) session = demo.role === "business"
+    ? { ...session, role:"business",businessId:demo.businessId }
+    : { ...session,role:"student",teamId:demo.teamId };
   return resolveSession(session);
 }
 export async function setSessionCookie(session: WorkspaceSession) {
   const jar = await cookies();
-  const previousBusiness = jar.get(ROLE_COOKIE)?.value === "business" ? jar.get(ACTOR_COOKIE)?.value : jar.get("tm_last_business")?.value;
-  const businessId = isDemoBusinessId(previousBusiness) ? previousBusiness : DEFAULT_DEMO_BUSINESS.id;
-  if (session.role === "student" && !isDemoTeamId(session.teamId)) throw new ApiError(403,"forbidden","Выберите демо-команду");
   const options = { httpOnly:true, sameSite:"lax" as const, secure:process.env.NODE_ENV === "production", path:"/", maxAge:60*60*24*30 };
-  jar.set("tm_last_business",businessId,options);
-  jar.set(ROLE_COOKIE,session.role === "student" ? "team" : "business",options);
-  jar.set(ACTOR_COOKIE,session.role === "student" ? session.teamId! : businessId,options);
+  if (session.onboardingCompleted) {
+    const actorId = session.role === "student" ? session.teamId : session.businessId;
+    if (!actorId) throw new ApiError(403,"forbidden","Завершите знакомство с платформой");
+    jar.set(ROLE_COOKIE,session.role === "student" ? "team" : "business",options);
+    jar.set(ACTOR_COOKIE,actorId,options);
+  } else {
+    jar.delete(ROLE_COOKIE);
+    jar.delete(ACTOR_COOKIE);
+  }
   jar.set(SESSION_COOKIE, JSON.stringify(session), options);
 }
 export async function jsonBody<T>(
@@ -89,6 +97,7 @@ export function apiRoute(
     try {
       assertSameOrigin(request);
       const result = await handler(request, context, await getSession());
+      if (result instanceof Response) return result;
       return NextResponse.json(result, {
         status,
         headers: { "Cache-Control": "no-store" },

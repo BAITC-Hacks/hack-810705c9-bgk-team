@@ -14,6 +14,7 @@ export const businesses = pgTable('business', {
   id: id(),
   name: text('name').notNull(),
   industry: text('industry').notNull().default(''),
+  logoKey: text('logo_key'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 

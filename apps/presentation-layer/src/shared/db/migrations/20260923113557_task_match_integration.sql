@@ -29,6 +29,7 @@ CREATE TABLE "business" (
 	"id" text PRIMARY KEY NOT NULL,
 	"name" text NOT NULL,
 	"industry" text DEFAULT '' NOT NULL,
+	"logo_key" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
@@ -233,8 +234,8 @@ CREATE INDEX "stage_proposal_idx" ON "stage" USING btree ("proposal_id");
 -- Preserve original workspace rows before retiring the superseded plural tables.
 -- Group-level confirmations and legacy score events are provenance, not ADR-004
 -- node confirmations or ADR-005 score history. No criterion is inferred here.
-INSERT INTO "business" (id, name, industry, created_at)
-SELECT id, name, industry, created_at FROM businesses;
+INSERT INTO "business" (id, name, industry, logo_key, created_at)
+SELECT id, name, industry, logo_key, created_at FROM businesses;
 --> statement-breakpoint
 INSERT INTO "team" (id, name, initials, tagline, skills, interests, members, color, created_at, updated_at)
 SELECT id, name, initials, tagline, skills, interests, members, color, created_at, updated_at FROM teams;

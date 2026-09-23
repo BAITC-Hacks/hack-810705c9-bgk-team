@@ -15,7 +15,7 @@ const roboto = Roboto({
 export const metadata: Metadata = {
   title: "AI-Sana — рабочее пространство",
   description:
-    "Рабочее пространство бизнеса и студенческих команд. Интерактивное демо AI-Sana.",
+    "Рабочее пространство бизнеса и студенческих команд AI-Sana.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

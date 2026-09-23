@@ -162,7 +162,7 @@ export function TaskNavigation({
         <div className="min-w-0 flex-1">
           <p className="text-[13px] font-semibold">Бизнес-пространство</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Все демо-публикации
+            Задачи и публикации
           </p>
         </div>
       </div>
