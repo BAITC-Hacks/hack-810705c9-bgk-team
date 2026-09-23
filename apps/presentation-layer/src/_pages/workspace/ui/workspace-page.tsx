@@ -6,6 +6,8 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type Dispatch,
+  type SetStateAction,
 } from "react";
 import {
   ArrowsExpand,
@@ -23,8 +25,6 @@ import type {
 import { toast } from "sonner";
 import {
   calculateScore,
-  createTask,
-  getDemoData,
   TASK_FIELDS,
   type Message,
   type Role,
@@ -32,12 +32,15 @@ import {
   type TaskField,
   type WorkspaceData,
 } from "@/entities/workspace";
-import { TaskEditor, type TaskEditorDraft } from "@/features/task-editor";
+import { requestError, workspaceApi, type WorkspaceSession, type WorkspaceSnapshot } from "@/entities/workspace/api";
+import { TaskEditor, hasTaskEditorChanges, type TaskEditorDraft } from "@/features/task-editor";
 import { TaskInspector } from "@/features/task-inspector";
 import { StudentCatalog } from "@/features/student-catalog";
 import { TeamPicker } from "@/features/team-picker";
 import { Button } from "@/shared/components/ui/button";
 import { IconAction } from "@/shared/components/icon-action";
+import { ThemeToggle } from "@/shared/components/theme-toggle";
+import { AiSanaLogo } from "@/shared/components/ai-sana-logo";
 import {
   Sheet,
   SheetContent,
@@ -87,11 +90,97 @@ const FOCUS_LAYOUT: Layout = {
 };
 
 export default function WorkspacePage() {
-  const [data, setData] = useState<WorkspaceData>(getDemoData);
-  const [role, setRole] = useState<Role>("business");
-  const [selectedId, setSelectedId] = useState("bakery-waste");
-  const [teamId, setTeamId] = useState(() => getDemoData().teams[0].id);
-  const [status, setStatus] = useState<"published" | "draft">("published");
+  const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [switching, setSwitching] = useState(false);
+
+  async function load() {
+    const next = await workspaceApi.load();
+    setSnapshot(next);
+    setError("");
+  }
+
+  async function retry() {
+    setLoading(true);
+    try { await load(); } catch (failure) { setError(requestError(failure)); }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => {
+    let active = true;
+    workspaceApi.load().then((next) => {
+      if (active) setSnapshot(next);
+    }).catch((failure) => {
+      if (active) setError(requestError(failure));
+    }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  async function changeSession(next: Partial<WorkspaceSession>) {
+    await workspaceApi.session(next);
+    await load();
+  }
+
+  const setData: Dispatch<SetStateAction<WorkspaceData>> = (update) => {
+    setSnapshot((current) => current ? {
+      ...current,
+      ...(typeof update === "function" ? update(current) : update),
+    } : current);
+  };
+
+  if (loading || !snapshot) return (
+    <main className="flex min-h-dvh items-center justify-center p-6">
+      <div className="absolute top-3 right-4"><ThemeToggle /></div>
+      <div className="max-w-md space-y-4 text-center" role={error ? "alert" : "status"}>
+        <h1 className="text-xl font-semibold">{loading ? "Загружаем рабочее пространство…" : "Не удалось загрузить данные"}</h1>
+        {error && <p className="text-sm text-muted-foreground">{error}</p>}
+        {!loading && <Button onClick={() => void retry()}>Попробовать снова</Button>}
+      </div>
+    </main>
+  );
+
+  if (!snapshot.tasks.length) return (
+    <main className="flex min-h-dvh items-center justify-center p-6">
+      <div className="absolute top-3 right-4"><ThemeToggle /></div>
+      <div className="max-w-lg space-y-5 text-center">
+        <h1 className="text-2xl font-semibold">{snapshot.session.role === "business" ? "Создайте первую задачу" : "Пока нет опубликованных задач"}</h1>
+        <p className="text-sm text-muted-foreground">{snapshot.session.role === "business" ? "Опишите задачу, заполните карточку и опубликуйте её для студенческих команд." : "Бизнес ещё готовит задачи. Обновите каталог позже."}</p>
+        <div className="flex justify-center gap-3">
+          {snapshot.session.role === "business" && <Button onClick={() => setShowCreate(true)}>Новая задача</Button>}
+          <Button variant="outline" disabled={switching} onClick={async () => {
+            setSwitching(true);
+            try { await changeSession({ role: snapshot.session.role === "business" ? "student" : "business" }); }
+            catch (failure) { toast.error(requestError(failure)); }
+            finally { setSwitching(false); }
+          }}>{snapshot.session.role === "business" ? "Роль студента" : "Роль бизнеса"}</Button>
+          <Button variant="outline" onClick={() => void retry()}>Обновить</Button>
+        </div>
+      </div>
+      <NewTaskDialog open={showCreate} onOpenChange={setShowCreate} onCreate={async (description) => {
+        const task = await workspaceApi.createTask(description);
+        setData((current) => ({ ...current, tasks: [task, ...current.tasks] }));
+      }} />
+      <Toaster position="bottom-center" closeButton />
+    </main>
+  );
+
+  return <WorkspaceContent data={snapshot} setData={setData} session={snapshot.session} onSessionChange={changeSession} onReload={load} />;
+}
+
+function WorkspaceContent({ data, setData, session, onSessionChange, onReload }: {
+  data: WorkspaceData;
+  setData: Dispatch<SetStateAction<WorkspaceData>>;
+  session: WorkspaceSession;
+  onSessionChange: (next: Partial<WorkspaceSession>) => Promise<void>;
+  onReload: () => Promise<void>;
+}) {
+  const role = session.role;
+  const teamId = session.teamId ?? "";
+  const [switching, setSwitching] = useState(false);
+  const [selectedId, setSelectedId] = useState(data.tasks[0].id);
+  const [status, setStatus] = useState<"published" | "draft">(data.tasks[0].status);
   const [cardOpen, setCardOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -99,7 +188,6 @@ export default function WorkspacePage() {
     {},
   );
   const [taskDrafts, setTaskDrafts] = useState<Record<string, Task>>({});
-  const [resetGeneration, setResetGeneration] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
   const [showDemo, setShowDemo] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
@@ -111,7 +199,7 @@ export default function WorkspacePage() {
   const editorContentRef = useRef<HTMLDivElement>(null);
   const mobileContentRef = useRef<HTMLDivElement>(null);
   const editorReturnFocus = useRef<HTMLElement | null>(null);
-  const editorDrafts = useRef(new Map<string, TaskEditorDraft>());
+  const [editorDrafts] = useState(() => new Map<string, TaskEditorDraft>());
   const previousLayout = useRef<Layout | undefined>(undefined);
   const [mobileDrawer, setMobileDrawer] = useState<"tasks" | "details" | null>(
     null,
@@ -123,7 +211,10 @@ export default function WorkspacePage() {
   );
   const canonicalTask =
     data.tasks.find((item) => item.id === selectedId) ?? data.tasks[0];
-  const hasDraftEdits = role === "business" && !!taskDrafts[canonicalTask.id];
+  const hasDraftEdits = role === "business" && (
+    !!taskDrafts[canonicalTask.id] ||
+    hasTaskEditorChanges(editorDrafts.get(canonicalTask.id), canonicalTask)
+  );
   const task =
     role === "business"
       ? (taskDrafts[canonicalTask.id] ?? canonicalTask)
@@ -136,18 +227,22 @@ export default function WorkspacePage() {
       (proposal) => proposal.teamId === teamId && proposal.milestoneConfirmed,
     ).length * 10;
 
-  function changeRole(next: Role) {
-    if (next === role) return;
-    setFocusMode(false);
-    setRole(next);
-    setCardOpen(false);
-    setMobileDrawer(null);
-    setQuery("");
-    setStatus("published");
-    if (task.status !== "published")
-      setSelectedId(
-        data.tasks.find((item) => item.status === "published")?.id ?? task.id,
-      );
+  async function changeRole(next: Role) {
+    if (next === role || switching) return;
+    setSwitching(true);
+    try {
+      await onSessionChange({ role: next });
+      setFocusMode(false);
+      setCardOpen(false);
+      setMobileDrawer(null);
+      setQuery("");
+      setStatus("published");
+    } catch (failure) { toast.error(requestError(failure)); }
+    finally { setSwitching(false); }
+  }
+
+  async function changeTeam(id: string) {
+    await onSessionChange({ teamId: id });
   }
 
   function toggleFocus() {
@@ -156,10 +251,21 @@ export default function WorkspacePage() {
     if (focusMode) {
       panels.setLayout(previousLayout.current ?? DEFAULT_LAYOUT);
     } else {
+      focusChatIfInside("task-navigation", "task-inspector");
       previousLayout.current = panels.getLayout();
       panels.setLayout(FOCUS_LAYOUT);
     }
     setFocusMode(!focusMode);
+  }
+
+  function focusChatIfInside(...panelIds: string[]) {
+    if (
+      panelIds.some((id) =>
+        document.getElementById(id)?.contains(document.activeElement),
+      )
+    ) {
+      document.getElementById("chat-message")?.focus();
+    }
   }
 
   function toggleNavigation() {
@@ -169,7 +275,10 @@ export default function WorkspacePage() {
     }
     setFocusMode(false);
     if (navigationRef.current?.isCollapsed()) navigationRef.current.expand();
-    else navigationRef.current?.collapse();
+    else {
+      focusChatIfInside("task-navigation");
+      navigationRef.current?.collapse();
+    }
   }
 
   function toggleProposals() {
@@ -179,7 +288,10 @@ export default function WorkspacePage() {
     }
     setFocusMode(false);
     if (inspectorRef.current?.isCollapsed()) inspectorRef.current.expand();
-    else inspectorRef.current?.collapse();
+    else {
+      focusChatIfInside("task-inspector");
+      inspectorRef.current?.collapse();
+    }
   }
 
   function showProposals() {
@@ -202,13 +314,20 @@ export default function WorkspacePage() {
   const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
     const scope = cardOpen
       ? editorContentRef.current
-      : mobileDrawer
+      : compact && mobileDrawer
         ? mobileContentRef.current
         : null;
     if (!shouldHandleShortcut(event, scope)) return;
+    if (event.key === "Escape" && scope) {
+      event.preventDefault();
+      if (cardOpen) setCardOpen(false);
+      else setMobileDrawer(null);
+      return;
+    }
     if (role === "business" && event.altKey && !event.shiftKey) {
       if (cardOpen && event.code !== "Digit2") return;
       if (
+        compact &&
         mobileDrawer &&
         event.code !== (mobileDrawer === "tasks" ? "Digit1" : "Digit3")
       )
@@ -225,7 +344,7 @@ export default function WorkspacePage() {
       }
       return;
     }
-    if (cardOpen || mobileDrawer) return;
+    if (cardOpen || (compact && mobileDrawer)) return;
     if (
       role === "business" &&
       (event.ctrlKey || event.metaKey) &&
@@ -250,8 +369,8 @@ export default function WorkspacePage() {
     }
   });
   useEffect(() => {
-    document.addEventListener("keydown", handleShortcut);
-    return () => document.removeEventListener("keydown", handleShortcut);
+    document.addEventListener("keydown", handleShortcut, true);
+    return () => document.removeEventListener("keydown", handleShortcut, true);
   }, []);
 
   function selectTask(id: string) {
@@ -260,8 +379,9 @@ export default function WorkspacePage() {
     setMobileDrawer(null);
   }
 
-  function saveTask(next: Task) {
-    editorDrafts.current.delete(next.id);
+  async function saveTask(input: Task) {
+    const next = await workspaceApi.saveTask(input);
+    editorDrafts.delete(next.id);
     setData((current) => ({
       ...current,
       tasks: current.tasks.map((item) => (item.id === next.id ? next : item)),
@@ -282,7 +402,7 @@ export default function WorkspacePage() {
       });
   }
 
-  function sendMessage(text: string, field?: TaskField, skill?: ChatSkillId) {
+  async function sendMessage(text: string, field?: TaskField, skill?: ChatSkillId) {
     let response = "";
     if (skill) {
       response = runChatSkill(task, data.proposals, data.teams, skill, text);
@@ -299,10 +419,11 @@ export default function WorkspacePage() {
           [task.id]: update(current[task.id] ?? canonicalTask),
         }));
       } else {
+        const saved = await workspaceApi.saveTask(update(task));
         setData((current) => ({
           ...current,
           tasks: current.tasks.map((item) =>
-            item.id === task.id ? update(item) : item,
+            item.id === saved.id ? saved : item,
           ),
         }));
       }
@@ -327,25 +448,21 @@ export default function WorkspacePage() {
     }));
   }
 
-  function resetDemo() {
-    const next = getDemoData();
-    setData(next);
-    setConversations({});
-    setTaskDrafts({});
-    editorDrafts.current.clear();
-    setResetGeneration((current) => current + 1);
-    setShowCreate(false);
-    setRole("business");
-    setSelectedId(next.tasks[0].id);
-    setTeamId(next.teams[0].id);
-    setQuery("");
-    setStatus("published");
-    setCardOpen(false);
-    setShortcutsOpen(false);
-    setShowDemo(false);
-    setFocusMode(false);
-    setMobileDrawer(null);
-    toast.success("Демонстрация начата заново");
+  async function resetDemo() {
+    if (switching) return;
+    setSwitching(true);
+    try {
+      await onReload();
+      setShowCreate(false);
+      setQuery("");
+      setCardOpen(false);
+      setShortcutsOpen(false);
+      setShowDemo(false);
+      setFocusMode(false);
+      setMobileDrawer(null);
+      toast.success("Сохранённые данные обновлены");
+    } catch (failure) { toast.error(requestError(failure)); }
+    finally { setSwitching(false); }
   }
 
   const navigation = (
@@ -381,6 +498,15 @@ export default function WorkspacePage() {
           </h1>
           <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
             <span className="truncate">Чат по задаче · {task.company}</span>
+            <button
+              type="button"
+              onClick={openCard}
+              className="shrink-0 font-semibold text-foreground underline-offset-4 hover:underline"
+              aria-label={`Готовность задачи: ${calculateScore(canonicalTask)} из 100. Открыть карточку`}
+              title="Готовность подтверждённой карточки"
+            >
+              {calculateScore(canonicalTask)} / 100
+            </button>
             <span className="hidden shrink-0 sm:inline">
               ·{" "}
               {hasDraftEdits
@@ -456,11 +582,12 @@ export default function WorkspacePage() {
       activeTeamId={teamId}
       onEditTask={openCard}
       onClose={toggleProposals}
-      onDecision={(id, decision) => {
+      onDecision={async (id, decision) => {
+        const saved = await workspaceApi.decide(id, decision);
         setData((current) => ({
           ...current,
           proposals: current.proposals.map((proposal) =>
-            proposal.id === id ? { ...proposal, status: decision } : proposal,
+            proposal.id === id ? saved : proposal,
           ),
         }));
         toast.success(
@@ -477,15 +604,8 @@ export default function WorkspacePage() {
           },
         );
       }}
-      onApply={(input) => {
-        const proposal = {
-          ...input,
-          id: crypto.randomUUID(),
-          taskId: task.id,
-          teamId,
-          status: "pending" as const,
-          milestoneConfirmed: false,
-        };
+      onApply={async (input) => {
+        const proposal = await workspaceApi.apply(task.id, { ...input, teamId });
         setData((current) => ({
           ...current,
           proposals: [...current.proposals, proposal],
@@ -494,13 +614,24 @@ export default function WorkspacePage() {
           description: "Переключитесь в роль бизнеса, чтобы увидеть отклик.",
         });
       }}
-      onMilestone={(id) => {
+      onSubmitMilestone={async (id, submission) => {
+        const proposal = await workspaceApi.submitMilestone(id, submission);
         setData((current) => ({
           ...current,
-          proposals: current.proposals.map((proposal) =>
-            proposal.id === id && proposal.status === "selected"
-              ? { ...proposal, milestoneConfirmed: true }
-              : proposal,
+          proposals: current.proposals.map((item) =>
+            item.id === id ? proposal : item,
+          ),
+        }));
+        toast.success("Результат этапа отправлен", {
+          description: "Баллы появятся после подтверждения бизнесом.",
+        });
+      }}
+      onMilestone={async (id) => {
+        const proposal = await workspaceApi.confirmMilestone(id);
+        setData((current) => ({
+          ...current,
+          proposals: current.proposals.map((item) =>
+            item.id === id ? proposal : item,
           ),
         }));
         toast.success("Этап подтверждён: +10 баллов команде", {
@@ -512,20 +643,21 @@ export default function WorkspacePage() {
 
   return (
     <div
-      key={resetGeneration}
       className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background"
     >
-      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b px-4 lg:px-6">
+      <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-4 sm:gap-3 lg:px-6">
         <div className="flex min-w-0 items-center gap-4">
           <button
             type="button"
             onClick={() => setShowDemo(true)}
             aria-label="О AI-Sana"
-            className="flex items-center gap-1.5 rounded focus-visible:outline-2 focus-visible:outline-primary"
+            data-logo-trigger
+            className="flex h-9 shrink-0 items-center rounded focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
           >
-            <span className="text-[23px] leading-none font-bold tracking-[-.7px]">
-              AI-Sana
-            </span>
+            <AiSanaLogo
+              aria-hidden="true"
+              className="h-auto w-20 min-[375px]:w-24 sm:w-28"
+            />
           </button>
           <span className="hidden h-5 w-px bg-border sm:block" />
           <span className="hidden items-center gap-3 text-[13px] font-medium text-muted-foreground xl:flex">
@@ -546,6 +678,7 @@ export default function WorkspacePage() {
               type="button"
               key={value}
               aria-pressed={role === value}
+              disabled={switching}
               onClick={() => changeRole(value)}
               className={cn(
                 "flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors sm:px-5",
@@ -559,6 +692,7 @@ export default function WorkspacePage() {
           ))}
         </div>
         <div className="flex items-center gap-1">
+          <ThemeToggle />
           <IconAction
             label="Горячие клавиши"
             shortcut="?"
@@ -570,15 +704,15 @@ export default function WorkspacePage() {
             variant="ghost"
             size="sm"
             onClick={() => setShowDemo(true)}
-            className="h-8 gap-1.5 bg-transparent px-2 text-xs font-semibold"
+            className="hidden h-8 gap-1.5 bg-transparent px-2 text-xs font-semibold min-[400px]:inline-flex"
           >
             Демо
           </Button>
           <div
-            title={role === "business" ? "Представитель бизнеса" : team.name}
+            title={role === "business" ? "Представитель бизнеса" : team?.name ?? "Студент"}
             className="hidden size-8 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-primary sm:flex"
           >
-            {role === "business" ? "Б" : team.initials}
+            {role === "business" ? "Б" : team?.initials ?? "С"}
           </div>
         </div>
       </header>
@@ -594,9 +728,10 @@ export default function WorkspacePage() {
               <TeamPicker
                 teams={data.teams}
                 activeTeamId={teamId}
-                onTeamChange={setTeamId}
+                onTeamChange={changeTeam}
                 points={points}
-                onTeamSave={(next) => {
+                onTeamSave={async (input) => {
+                  const next = await workspaceApi.saveTeam(input, data.teams.some((item) => item.id === input.id));
                   setData((current) => ({
                     ...current,
                     teams: current.teams.some((item) => item.id === next.id)
@@ -605,8 +740,9 @@ export default function WorkspacePage() {
                         )
                       : [...current.teams, next],
                   }));
-                  setTeamId(next.id);
                   toast.success("Профиль команды сохранён");
+                  try { await changeTeam(next.id); }
+                  catch (failure) { toast.error(`Профиль сохранён, но переключить команду не удалось. ${requestError(failure)}`); }
                 }}
               />
             }
@@ -631,9 +767,11 @@ export default function WorkspacePage() {
               maxSize="26%"
               collapsible
               collapsedSize={0}
-              onResize={(size) =>
-                setNavigationCollapsed(size.asPercentage === 0)
-              }
+              onResize={(size) => {
+                if (size.asPercentage === 0)
+                  focusChatIfInside("task-navigation");
+                setNavigationCollapsed(size.asPercentage === 0);
+              }}
               inert={focusMode || navigationCollapsed}
               aria-hidden={focusMode || navigationCollapsed || undefined}
             >
@@ -668,9 +806,11 @@ export default function WorkspacePage() {
               maxSize="42%"
               collapsible
               collapsedSize={0}
-              onResize={(size) =>
-                setInspectorCollapsed(size.asPercentage === 0)
-              }
+              onResize={(size) => {
+                if (size.asPercentage === 0)
+                  focusChatIfInside("task-inspector");
+                setInspectorCollapsed(size.asPercentage === 0);
+              }}
               inert={focusMode || inspectorCollapsed}
               aria-hidden={focusMode || inspectorCollapsed || undefined}
             >
@@ -686,6 +826,12 @@ export default function WorkspacePage() {
           ref={editorContentRef}
           showCloseButton={false}
           className="gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-[600px]"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            editorContentRef.current
+              ?.querySelector<HTMLInputElement>("input")
+              ?.focus();
+          }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             const previous = editorReturnFocus.current;
@@ -715,7 +861,7 @@ export default function WorkspacePage() {
               key={task.id}
               task={task}
               savedTask={canonicalTask}
-              draftCache={editorDrafts.current}
+              draftCache={editorDrafts}
               onSave={saveTask}
               onCancel={() => setCardOpen(false)}
             />
@@ -733,6 +879,13 @@ export default function WorkspacePage() {
           side={mobileDrawer === "tasks" ? "left" : "right"}
           showCloseButton={false}
           className="gap-0 p-0 data-[side=left]:w-full data-[side=right]:w-full data-[side=left]:sm:max-w-[380px] data-[side=right]:sm:max-w-[420px] [&_.workspace-panel]:rounded-none [&_.workspace-panel]:border-0"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            const content = mobileContentRef.current;
+            const search = content?.querySelector<HTMLInputElement>("input");
+            if (search) search.focus();
+            else content?.focus();
+          }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             document.getElementById("chat-message")?.focus();
@@ -805,8 +958,8 @@ export default function WorkspacePage() {
       <NewTaskDialog
         open={showCreate}
         onOpenChange={setShowCreate}
-        onCreate={(description) => {
-          const next = createTask(description);
+        onCreate={async (description) => {
+          const next = await workspaceApi.createTask(description);
           setData((current) => ({
             ...current,
             tasks: [next, ...current.tasks],
@@ -826,7 +979,7 @@ export default function WorkspacePage() {
               AI-Sana · демо
             </DialogTitle>
             <DialogDescription className="pt-2 leading-relaxed">
-              Это интерактивный frontend с вымышленными задачами и командами.
+              Рабочее пространство с демонстрационными задачами и командами.
               Ассистент отвечает по подготовленным сценариям.
             </DialogDescription>
           </DialogHeader>
@@ -845,15 +998,15 @@ export default function WorkspacePage() {
             ))}
           </ol>
           <p className="text-[11px] leading-relaxed text-muted-foreground">
-            Данные хранятся в памяти вкладки и сбрасываются при обновлении
-            страницы. Отправки во внешние сервисы нет.
+            Задачи, команды, отклики и результаты этапов сохраняются в базе данных.
+            Переключатель ролей предназначен для демонстрации. Беседа с ассистентом остаётся в этой вкладке.
           </p>
-          <Button variant="outline" onClick={resetDemo} className="mt-2">
-            Начать демо заново
+          <Button variant="outline" disabled={switching} onClick={resetDemo} className="mt-2">
+            Обновить сохранённые данные
           </Button>
         </DialogContent>
       </Dialog>
-      <Toaster theme="light" position="bottom-center" closeButton />
+      <Toaster position="bottom-center" closeButton />
     </div>
   );
 }

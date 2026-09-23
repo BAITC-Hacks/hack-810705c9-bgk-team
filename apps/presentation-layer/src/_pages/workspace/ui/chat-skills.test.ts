@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { getDemoData } from "@/entities/workspace";
+import { getDemoData, TASK_FIELDS } from "@/entities/workspace";
 import { getMentionRange, removeMention, runChatSkill } from "./chat-skills";
 
 describe("composer mentions", () => {
@@ -30,6 +30,27 @@ describe("composer mentions", () => {
 });
 
 describe("local business skills", () => {
+  it("asks for confirmation instead of repeating answered questions", () => {
+    const data = getDemoData();
+    const task = structuredClone(data.tasks[0]);
+    for (const { key } of TASK_FIELDS) task.fields[key] = `Ответ для ${key}`;
+    task.confirmedFields = [];
+    const answer = runChatSkill(task, data.proposals, data.teams, "clarify", "");
+    assert.match(answer, /Все ответы уже внесены/);
+    assert.match(answer, /проверить и подтвердить/);
+    assert.match(answer, /повторно отвечать на эти вопросы не нужно/);
+    assert.doesNotMatch(answer, /заполнены и подтверждены/);
+  });
+
+  it("directs a complete draft to publication before comparing proposals", () => {
+    const data = getDemoData();
+    const task = structuredClone(data.tasks[0]);
+    for (const { key } of TASK_FIELDS) task.fields[key] = `Ответ для ${key}`;
+    task.confirmedFields = TASK_FIELDS.map(({ key }) => key);
+    task.status = "draft";
+    assert.match(runChatSkill(task, data.proposals, data.teams, "clarify", ""), /опубликуйте задачу/);
+  });
+
   it("uses confirmed readiness and leaves all data unchanged", () => {
     const data = getDemoData();
     const snapshot = JSON.stringify(data);

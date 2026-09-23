@@ -1,6 +1,7 @@
 "use client";
 
 import type { ComponentProps } from "react";
+import { cn } from "@/shared/lib/utils";
 import { Button } from "@/shared/components/ui/button";
 import {
   Tooltip,
@@ -22,6 +23,7 @@ export function IconAction({
   variant = "ghost",
   size = "icon",
   type = "button",
+  className,
   ...props
 }: IconActionProps) {
   return (
@@ -33,6 +35,10 @@ export function IconAction({
             type={type}
             variant={variant}
             size={size}
+            className={cn(
+              "size-8 aria-pressed:bg-muted aria-expanded:bg-muted",
+              className,
+            )}
             aria-label={label}
           >
             {children}

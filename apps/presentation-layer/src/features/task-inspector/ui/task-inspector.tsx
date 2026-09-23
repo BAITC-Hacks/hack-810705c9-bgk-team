@@ -15,6 +15,7 @@ import {
   TASK_FIELDS,
   calculateScore,
   readiness,
+  type MilestoneSubmission,
   type Proposal,
   type Task,
   type Team,
@@ -34,6 +35,7 @@ import {
 import { Input } from "@/shared/components/ui/input";
 import { Textarea } from "@/shared/components/ui/textarea";
 import { cn } from "@/shared/lib/utils";
+import { useAsyncAction } from "@/shared/hooks/use-async-action";
 
 type ApplicationInput = {
   idea: string;
@@ -48,9 +50,10 @@ export type TaskInspectorProps = {
   teams: Team[];
   proposals: Proposal[];
   activeTeamId: string;
-  onDecision: (id: string, status: "pending" | "selected" | "rejected") => void;
-  onApply: (input: ApplicationInput) => void;
-  onMilestone: (id: string) => void;
+  onDecision: (id: string, status: "pending" | "selected" | "rejected") => void | Promise<void>;
+  onApply: (input: ApplicationInput) => void | Promise<void>;
+  onMilestone: (id: string) => void | Promise<void>;
+  onSubmitMilestone: (id: string, result: MilestoneSubmission) => void | Promise<void>;
   onEditTask: () => void;
   onClose?: () => void;
 };
@@ -61,7 +64,7 @@ const proposalStatus = {
   rejected: "Отклонён",
 };
 
-function safePrototypeUrl(value: string): string | null {
+function safeHttpUrl(value: string): string | null {
   try {
     const url = new URL(value);
     return url.protocol === "https:" || url.protocol === "http:"
@@ -99,7 +102,7 @@ function ProposalDetails({ proposal }: { proposal: Proposal }) {
     .split(/\n|→/)
     .map((step) => step.replace(/^\s*(?:\d+[.)]|[-•])\s*/, "").trim())
     .filter(Boolean);
-  const prototypeUrl = safePrototypeUrl(proposal.prototypeUrl);
+  const prototypeUrl = safeHttpUrl(proposal.prototypeUrl);
 
   return (
     <div className="space-y-5">
@@ -145,6 +148,159 @@ function ProposalDetails({ proposal }: { proposal: Proposal }) {
   );
 }
 
+function MilestoneDetails({ result }: { result: MilestoneSubmission }) {
+  const resultUrl = safeHttpUrl(result.resultUrl);
+
+  return (
+    <div className="space-y-2 text-sm">
+      <p className="break-words font-semibold">{result.title}</p>
+      <p className="whitespace-pre-line break-words leading-relaxed text-muted-foreground">
+        {result.comment}
+      </p>
+      {resultUrl ? (
+        <a
+          href={resultUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 rounded-sm font-semibold underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+        >
+          Посмотреть результат
+          <ArrowUpRight className="size-3.5" aria-hidden="true" />
+          <span className="sr-only"> — откроется в новой вкладке</span>
+        </a>
+      ) : (
+        <p className="text-xs text-muted-foreground">Ссылка на результат недоступна.</p>
+      )}
+    </div>
+  );
+}
+
+function MilestoneDialog({
+  proposal,
+  onSubmit,
+}: {
+  proposal: Proposal;
+  onSubmit: TaskInspectorProps["onSubmitMilestone"];
+}) {
+  const [open, setOpen] = useState(false);
+  const { pending, error, run } = useAsyncAction();
+  const [values, setValues] = useState<MilestoneSubmission>({
+    title: "",
+    resultUrl: "",
+    comment: "",
+  });
+  const [errors, setErrors] = useState<
+    Partial<Record<keyof MilestoneSubmission, string>>
+  >({});
+  const id = useId();
+
+  function changeOpen(next: boolean) {
+    if (pending) return;
+    if (next) {
+      setValues(proposal.milestone ?? { title: "", resultUrl: "", comment: "" });
+      setErrors({});
+    }
+    setOpen(next);
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const result = {
+      title: values.title.trim(),
+      resultUrl: values.resultUrl.trim(),
+      comment: values.comment.trim(),
+    };
+    const nextErrors: typeof errors = {};
+    for (const field of Object.keys(result) as (keyof MilestoneSubmission)[]) {
+      if (!result[field]) nextErrors[field] = "Заполните это поле";
+    }
+    if (result.resultUrl && !safeHttpUrl(result.resultUrl)) {
+      nextErrors.resultUrl = "Укажите полную ссылку с https:// или http://";
+    }
+    setErrors(nextErrors);
+    const firstError = (Object.keys(nextErrors) as (keyof MilestoneSubmission)[])[0];
+    if (firstError) {
+      (event.currentTarget.elements.namedItem(firstError) as HTMLElement | null)?.focus();
+      return;
+    }
+    if (!await run(() => onSubmit(proposal.id, result))) return;
+    setOpen(false);
+  }
+
+  const fields: {
+    key: keyof MilestoneSubmission;
+    label: string;
+    placeholder: string;
+    maxLength: number;
+  }[] = [
+    { key: "title", label: "Название этапа", placeholder: "Например, первый прототип", maxLength: 120 },
+    { key: "resultUrl", label: "Ссылка на результат", placeholder: "https://…", maxLength: 2048 },
+    { key: "comment", label: "Что сделано", placeholder: "Опишите фактический результат и как его проверить", maxLength: 2000 },
+  ];
+
+  return (
+    <Dialog open={open} onOpenChange={changeOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" className="h-10 w-full text-[13px] font-semibold">
+          {proposal.milestone ? "Изменить результат" : "Сдать этап"}
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[90dvh] overflow-y-auto p-6 sm:max-w-lg">
+        <DialogHeader className="pr-6">
+          <DialogTitle className="text-xl font-bold tracking-tight">
+            {proposal.milestone ? "Изменить результат этапа" : "Сдать этап"}
+          </DialogTitle>
+          <DialogDescription className="pt-1 text-sm leading-relaxed">
+            Передайте бизнесу выполненную работу. Команда получит 10 баллов после подтверждения результата.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} noValidate className="space-y-4">
+          <fieldset disabled={pending} className="contents">
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          {fields.map((field) => {
+            const shared = {
+              id: `${id}-${field.key}`,
+              name: field.key,
+              value: values[field.key],
+              placeholder: field.placeholder,
+              maxLength: field.maxLength,
+              required: true,
+              "aria-invalid": Boolean(errors[field.key]),
+              "aria-describedby": errors[field.key] ? `${id}-${field.key}-error` : undefined,
+              onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+                setValues((current) => ({ ...current, [field.key]: event.target.value }));
+                setErrors((current) => ({ ...current, [field.key]: undefined }));
+              },
+            };
+            return (
+              <div key={field.key} className="space-y-1.5">
+                <label htmlFor={shared.id} className="text-sm font-semibold">{field.label}</label>
+                {field.key === "comment" ? (
+                  <Textarea {...shared} rows={4} className="min-h-24 resize-y text-sm" />
+                ) : (
+                  <Input {...shared} type={field.key === "resultUrl" ? "url" : "text"} className="h-10 text-sm" />
+                )}
+                {errors[field.key] ? (
+                  <p id={`${id}-${field.key}-error`} role="alert" className="text-xs text-destructive">
+                    {errors[field.key]}
+                  </p>
+                ) : null}
+              </div>
+            );
+          })}
+          <DialogFooter className="m-0 gap-2 rounded-none border-0 bg-transparent p-0 pt-2">
+            <DialogClose asChild>
+              <Button variant="outline" type="button" className="h-10 font-semibold">Отмена</Button>
+            </DialogClose>
+            <Button type="submit" className="h-10 font-semibold">Отправить на проверку</Button>
+          </DialogFooter>
+          </fieldset>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function BusinessInspector({
   task,
   teams,
@@ -155,6 +311,7 @@ function BusinessInspector({
   onClose,
 }: TaskInspectorProps) {
   const [view, setView] = useState<"cards" | "list">("cards");
+  const { pending, error, run } = useAsyncAction();
   const [activeProposalId, setActiveProposalId] = useState<string | null>(null);
   const taskProposals = proposals.filter(
     (proposal) => proposal.taskId === task.id,
@@ -302,26 +459,34 @@ function BusinessInspector({
               </p>
             </div>
             <ProposalDetails proposal={proposal} />
-            {proposal.status === "selected" ? (
+            {proposal.status === "selected" || proposal.milestone ? (
               <div className="mt-5 border-t pt-4" aria-live="polite">
+                <h4 className="mb-3 text-sm font-semibold">Результат этапа</h4>
+                {proposal.milestone ? <MilestoneDetails result={proposal.milestone} /> : null}
                 {proposal.milestoneConfirmed ? (
-                  <p className="text-[13px] font-semibold text-foreground">
+                  <p className="mt-3 text-[13px] font-semibold text-foreground">
                     Этап подтверждён · +10 баллов
                   </p>
-                ) : (
+                ) : proposal.milestone && proposal.status === "selected" ? (
                   <>
-                    <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
-                      Команда показала результат? Подтвердите этап, чтобы
-                      начислить ей 10 баллов.
+                    <p className="my-3 text-xs leading-relaxed text-muted-foreground">
+                      Проверьте работу по ссылке. Подтверждение начислит команде 10 баллов один раз.
                     </p>
                     <Button
                       variant="outline"
                       className="h-10 w-full bg-card text-[13px] font-semibold"
-                      onClick={() => onMilestone(proposal.id)}
+                      disabled={pending}
+                      onClick={() => void run(() => onMilestone(proposal.id))}
                     >
                       Подтвердить этап
                     </Button>
                   </>
+                ) : (
+                  <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+                    {proposal.milestone
+                      ? "Результат сохранён. Подтверждение доступно после выбора команды."
+                      : "Команда ещё не сдала этап. Подтверждение станет доступно после отправки результата."}
+                  </p>
                 )}
               </div>
             ) : null}
@@ -337,19 +502,22 @@ function BusinessInspector({
       </div>
       {view === "cards" && proposal ? (
         <footer className="shrink-0 space-y-3 border-t bg-card px-5 py-4">
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <div aria-live="polite">
             {proposal.status === "pending" ? (
               <div className="grid grid-cols-[0.85fr_1.15fr] gap-2">
                 <Button
                   variant="outline"
                   className="h-10 px-2 text-[13px] font-semibold"
-                  onClick={() => onDecision(proposal.id, "rejected")}
+                  disabled={pending}
+                  onClick={() => void run(() => onDecision(proposal.id, "rejected"))}
                 >
                   Отклонить
                 </Button>
                 <Button
                   className="h-10 gap-1.5 px-2 text-[13px] font-semibold"
-                  onClick={() => onDecision(proposal.id, "selected")}
+                  disabled={pending}
+                  onClick={() => void run(() => onDecision(proposal.id, "selected"))}
                 >
                   Выбрать команду
                 </Button>
@@ -358,7 +526,8 @@ function BusinessInspector({
               <Button
                 variant="outline"
                 className="h-10 w-full text-[13px] font-semibold"
-                onClick={() => onDecision(proposal.id, "pending")}
+                disabled={pending}
+                onClick={() => void run(() => onDecision(proposal.id, "pending"))}
               >
                 <ArrowUturnCcwLeft className="size-4" aria-hidden="true" />
                 Отменить решение
@@ -410,6 +579,7 @@ function ApplicationDialog({
   onApply: TaskInspectorProps["onApply"];
 }) {
   const [open, setOpen] = useState(false);
+  const { pending, error, run } = useAsyncAction();
   const [values, setValues] = useState<ApplicationInput>({
     idea: "",
     plan: "",
@@ -421,7 +591,7 @@ function ApplicationDialog({
   >({});
   const id = useId();
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const input = {
       idea: values.idea.trim(),
@@ -433,7 +603,7 @@ function ApplicationDialog({
     for (const field of Object.keys(input) as (keyof ApplicationInput)[]) {
       if (!input[field]) nextErrors[field] = "Заполните это поле";
     }
-    if (input.prototypeUrl && !safePrototypeUrl(input.prototypeUrl))
+    if (input.prototypeUrl && !safeHttpUrl(input.prototypeUrl))
       nextErrors.prototypeUrl = "Укажите полную ссылку с https:// или http://";
     setErrors(nextErrors);
     const firstError = (
@@ -445,7 +615,7 @@ function ApplicationDialog({
       )?.focus();
       return;
     }
-    onApply(input);
+    if (!await run(() => onApply(input))) return;
     setOpen(false);
   }
 
@@ -481,7 +651,7 @@ function ApplicationDialog({
   ];
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(next) => { if (!pending) setOpen(next); }}>
       <DialogTrigger asChild>
         <Button className="h-11 w-full text-sm font-semibold">
           Предложить решение
@@ -510,6 +680,8 @@ function ApplicationDialog({
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} noValidate className="space-y-4">
+          <fieldset disabled={pending} className="contents">
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           {fields.map((field) => {
             const shared = {
               id: `${id}-${field.key}`,
@@ -572,6 +744,7 @@ function ApplicationDialog({
               Отправить отклик
             </Button>
           </DialogFooter>
+          </fieldset>
         </form>
       </DialogContent>
     </Dialog>
@@ -584,6 +757,7 @@ function StudentInspector({
   proposals,
   activeTeamId,
   onApply,
+  onSubmitMilestone,
 }: TaskInspectorProps) {
   const team = teams.find((item) => item.id === activeTeamId);
   const proposal = proposals.find(
@@ -653,6 +827,10 @@ function StudentInspector({
         >
           {[
             {
+              label: "Потребность бизнеса",
+              value: task.fields.need,
+            },
+            {
               label: "Ожидаемый результат",
               value: task.fields.outcome,
             },
@@ -693,7 +871,7 @@ function StudentInspector({
           </summary>
           <dl className="mt-4 space-y-4">
             {TASK_FIELDS.filter(
-              ({ key }) => !["outcome", "success", "data"].includes(key),
+              ({ key }) => !["need", "outcome", "success", "data"].includes(key),
             ).map(({ key, label }) => (
               <div key={key}>
                 <dt className="mb-1.5 text-sm font-semibold">{label}</dt>
@@ -740,10 +918,25 @@ function StudentInspector({
               <div className="border-t pt-4">
                 <ProposalDetails proposal={proposal} />
               </div>
-              {proposal.milestoneConfirmed ? (
-                <p className="text-[13px] font-semibold text-foreground">
-                  Этап подтверждён · +10 баллов
-                </p>
+              {proposal.status === "selected" || proposal.milestone ? (
+                <section className="space-y-3 border-t pt-4">
+                  <h4 className="text-sm font-semibold">Результат этапа</h4>
+                  {proposal.milestone ? <MilestoneDetails result={proposal.milestone} /> : null}
+                  {proposal.milestoneConfirmed ? (
+                    <p className="text-[13px] font-semibold text-foreground">Этап подтверждён · +10 баллов</p>
+                  ) : proposal.status === "selected" ? (
+                    <>
+                      <p className="text-xs leading-relaxed text-muted-foreground">
+                        {proposal.milestone
+                          ? "Результат отправлен на проверку. Баллы появятся после подтверждения бизнесом."
+                          : "Поделитесь выполненной работой: название этапа, ссылка и краткое описание результата."}
+                      </p>
+                      <MilestoneDialog proposal={proposal} onSubmit={onSubmitMilestone} />
+                    </>
+                  ) : (
+                    <p className="text-xs leading-relaxed text-muted-foreground">Результат сохранён. Дождитесь решения бизнеса о выборе команды.</p>
+                  )}
+                </section>
               ) : null}
             </div>
           ) : task.status === "draft" ? (
