@@ -55,9 +55,16 @@ function subscribeCompact(onChange: () => void) {
 const getCompact = () => window.matchMedia(COMPACT_QUERY).matches;
 const getServerCompact = () => false;
 
-export default function WorkspacePage() {
+/** `initialRole` приходит из cookie демо-роли (ADR-008), чтобы оба переключателя совпадали. */
+export default function WorkspacePage({ initialRole = "business" }: { initialRole?: Role }) {
   const [data, setData] = useState<WorkspaceData>(getDemoData);
-  const [role, setRole] = useState<Role>("business");
+  const [role, setRole] = useState<Role>(initialRole);
+  const [cookieRole, setCookieRole] = useState(initialRole);
+  if (cookieRole !== initialRole) {
+    // Переключатель демо-роли в оболочке сменил cookie: подстраиваемся без сброса данных.
+    setCookieRole(initialRole);
+    setRole(initialRole);
+  }
   const [selectedId, setSelectedId] = useState("bakery-waste");
   const [teamId, setTeamId] = useState(() => getDemoData().teams[0].id);
   const [status, setStatus] = useState<"published" | "draft">("published");
@@ -201,7 +208,7 @@ export default function WorkspacePage() {
     setTaskDrafts({});
     setResetGeneration((current) => current + 1);
     setShowCreate(false);
-    setRole("business");
+    setRole(initialRole);
     setSelectedId(next.tasks[0].id);
     setTeamId(next.teams[0].id);
     setQuery("");
