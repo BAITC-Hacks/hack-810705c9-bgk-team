@@ -1,6 +1,6 @@
 import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
-import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
+import { ArrowRotateRight, Check, CircleInfo, TriangleExclamation, Xmark } from "@gravity-ui/icons"
 
 const Toaster = ({ ...props }: ToasterProps) => {
   const { theme = "system" } = useTheme()
@@ -11,19 +11,19 @@ const Toaster = ({ ...props }: ToasterProps) => {
       className="toaster group"
       icons={{
         success: (
-          <CircleCheckIcon className="size-4" />
+          <Check className="size-4" aria-hidden="true" />
         ),
         info: (
-          <InfoIcon className="size-4" />
+          <CircleInfo className="size-4" aria-hidden="true" />
         ),
         warning: (
-          <TriangleAlertIcon className="size-4" />
+          <TriangleExclamation className="size-4" aria-hidden="true" />
         ),
         error: (
-          <OctagonXIcon className="size-4" />
+          <Xmark className="size-4" aria-hidden="true" />
         ),
         loading: (
-          <Loader2Icon className="size-4 animate-spin" />
+          <ArrowRotateRight className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
         ),
       }}
       style={
