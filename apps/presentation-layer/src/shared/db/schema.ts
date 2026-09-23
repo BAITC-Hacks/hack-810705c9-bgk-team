@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, integer, jsonb, pgEnum, pgTable, primaryKey, serial, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, check, index, integer, jsonb, pgEnum, pgTable, primaryKey, serial, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
@@ -19,6 +19,10 @@ export const tasks = pgTable('tasks', {
   neededRoles: text('needed_roles').array().notNull().default([]),
   neededSkills: text('needed_skills').array().notNull().default([]),
   score: integer('score').notNull().default(0),
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+  workFormat: text('work_format'),
+  paymentTerms: text('payment_terms'),
+  tagsState: text('tags_state').notNull().default('suggested'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -80,7 +84,7 @@ export const grillTurn = pgTable('grill_turn', {
 export const taskField = pgTable('task_field', {
   taskId: uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
   node: text('node').notNull(),
-  value: text('value'),
+  value: text('value').notNull().default(''),
   state: grillFieldState('state').notNull().default('suggested'),
   notApplicable: boolean('not_applicable').notNull().default(false),
   naNote: text('na_note'),
@@ -97,6 +101,7 @@ export const taskField = pgTable('task_field', {
 ]);
 
 export const criterion = pgTable('criterion', {
+  id: uuid('id').defaultRandom().notNull().unique(),
   taskId: uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
   position: integer('position').notNull(),
   metric: text('metric').notNull(),
@@ -112,14 +117,25 @@ export const criterion = pgTable('criterion', {
   primaryKey({ name: 'criterion_pk', columns: [table.taskId, table.position] }),
   check('criterion_position_range', sql`${table.position} BETWEEN 1 AND 3`),
 ]);
-export const scoreEvents = pgTable('score_events', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  taskId: uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
-  nodeKey: text('node_key'),
-  before: integer('before').notNull(),
-  after: integer('after').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
+export const scoreEvent = pgTable(
+  'score_event',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => task.id, { onDelete: 'cascade' }),
+    before: integer('before').notNull(),
+    after: integer('after').notNull(),
+    levelBefore: text('level_before').notNull(),
+    levelAfter: text('level_after').notNull(),
+    // Узел-причина пересчёта или 'task'
+    node: text('node').notNull(),
+    placeBefore: integer('place_before').notNull(),
+    placeAfter: integer('place_after').notNull(),
+    at: timestamp('at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('score_event_task_at_idx').on(t.taskId, t.at.desc())],
+);
 
 export const aiLogs = pgTable('ai_logs', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -171,3 +187,9 @@ export const proposalStages = pgTable('proposal_stages', {
 export const taskFields = taskField;
 export const grillSessions = grillSession;
 export const grillTurns = grillTurn;
+
+export const task = tasks;
+export type TaskRow = typeof task.$inferSelect;
+export type TaskFieldRow = typeof taskField.$inferSelect;
+export type CriterionRow = typeof criterion.$inferSelect;
+export type ScoreEventRow = typeof scoreEvent.$inferSelect;

@@ -24,6 +24,7 @@ CREATE TABLE "ai_logs" (
 );
 --> statement-breakpoint
 CREATE TABLE "criterion" (
+	"id" uuid DEFAULT gen_random_uuid() NOT NULL,
 	"task_id" uuid NOT NULL,
 	"position" integer NOT NULL,
 	"metric" text NOT NULL,
@@ -36,6 +37,7 @@ CREATE TABLE "criterion" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "criterion_pk" PRIMARY KEY("task_id","position"),
+	CONSTRAINT "criterion_id_unique" UNIQUE("id"),
 	CONSTRAINT "criterion_position_range" CHECK ("criterion"."position" BETWEEN 1 AND 3)
 );
 --> statement-breakpoint
@@ -102,30 +104,17 @@ CREATE TABLE "proposals" (
 	"decided_at" timestamp with time zone
 );
 --> statement-breakpoint
-CREATE TABLE "score_events" (
+CREATE TABLE "score_event" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"task_id" uuid NOT NULL,
-	"node_key" text,
 	"before" integer NOT NULL,
 	"after" integer NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL
-);
---> statement-breakpoint
-CREATE TABLE "task_field" (
-	"task_id" uuid NOT NULL,
+	"level_before" text NOT NULL,
+	"level_after" text NOT NULL,
 	"node" text NOT NULL,
-	"value" text,
-	"state" "grill_field_state" DEFAULT 'suggested' NOT NULL,
-	"not_applicable" boolean DEFAULT false NOT NULL,
-	"na_note" text,
-	"source" "grill_field_source" NOT NULL,
-	"source_quote" text NOT NULL,
-	"source_turn_id" integer,
-	"confirmed_at" timestamp with time zone,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "task_field_pk" PRIMARY KEY("task_id","node"),
-	CONSTRAINT "task_field_na_note_required" CHECK (NOT "task_field"."not_applicable" OR "task_field"."na_note" IS NOT NULL)
+	"place_before" integer NOT NULL,
+	"place_after" integer NOT NULL,
+	"at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "tasks" (
@@ -139,8 +128,29 @@ CREATE TABLE "tasks" (
 	"needed_roles" text[] DEFAULT '{}' NOT NULL,
 	"needed_skills" text[] DEFAULT '{}' NOT NULL,
 	"score" integer DEFAULT 0 NOT NULL,
+	"published_at" timestamp with time zone,
+	"work_format" text,
+	"payment_terms" text,
+	"tags_state" text DEFAULT 'suggested' NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "task_field" (
+	"task_id" uuid NOT NULL,
+	"node" text NOT NULL,
+	"value" text DEFAULT '' NOT NULL,
+	"state" "grill_field_state" DEFAULT 'suggested' NOT NULL,
+	"not_applicable" boolean DEFAULT false NOT NULL,
+	"na_note" text,
+	"source" "grill_field_source" NOT NULL,
+	"source_quote" text NOT NULL,
+	"source_turn_id" integer,
+	"confirmed_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "task_field_pk" PRIMARY KEY("task_id","node"),
+	CONSTRAINT "task_field_na_note_required" CHECK (NOT "task_field"."not_applicable" OR "task_field"."na_note" IS NOT NULL)
 );
 --> statement-breakpoint
 ALTER TABLE "ai_logs" ADD CONSTRAINT "ai_logs_task_id_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -151,6 +161,7 @@ ALTER TABLE "grill_session" ADD CONSTRAINT "grill_session_task_id_tasks_id_fk" F
 ALTER TABLE "grill_turn" ADD CONSTRAINT "grill_turn_session_id_grill_session_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."grill_session"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "proposal_stages" ADD CONSTRAINT "proposal_stages_proposal_id_proposals_id_fk" FOREIGN KEY ("proposal_id") REFERENCES "public"."proposals"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "proposals" ADD CONSTRAINT "proposals_task_id_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "score_events" ADD CONSTRAINT "score_events_task_id_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "score_event" ADD CONSTRAINT "score_event_task_id_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "task_field" ADD CONSTRAINT "task_field_task_id_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "task_field" ADD CONSTRAINT "task_field_source_turn_id_grill_turn_id_fk" FOREIGN KEY ("source_turn_id") REFERENCES "public"."grill_turn"("id") ON DELETE set null ON UPDATE no action;
+ALTER TABLE "task_field" ADD CONSTRAINT "task_field_source_turn_id_grill_turn_id_fk" FOREIGN KEY ("source_turn_id") REFERENCES "public"."grill_turn"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "score_event_task_at_idx" ON "score_event" USING btree ("task_id","at" DESC NULLS LAST);

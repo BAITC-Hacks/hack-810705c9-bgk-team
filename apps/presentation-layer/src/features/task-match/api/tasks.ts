@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { db } from '@/shared/db';
 import { aiLogs, grillSessions, grillTurns, taskFields, tasks } from '@/shared/db/schema';
 import { analyzeText } from '@/shared/api/mastra';
-import { fallbackQuestion, score, type Card, type NodeKey } from '@/entities/task-match';
+import { fallbackQuestion, type NodeKey } from '@/entities/task-match';
 import { projectWorkspaceTask } from '@/entities/task-match';
 import { ApiError } from './http';
 import { createGrill, getGrill, submitTurn, checkpoint as grillCheckpoint, patchField } from '@/features/grill/api/service';
@@ -25,7 +25,6 @@ const patchSchema = z.object({
 });
 
 type TaskRow = typeof tasks.$inferSelect;
-type FieldRow = typeof taskFields.$inferSelect;
 
 const isNode = (value: string): value is NodeKey =>
   ['context.current','context.size','context.change','data.what','data.volume','data.sample','result.artifact','result.acceptance','criteria.items','constraints.deadline','constraints.stack','constraints.other','users.role','users.scale','link.contact','link.cadence','link.response'].includes(value);
@@ -39,16 +38,6 @@ const workspaceNodes: Record<string, NodeKey[]> = {
 const workspaceToNode: Record<string, NodeKey> = Object.fromEntries(
   Object.entries(workspaceNodes).map(([group, nodes]) => [group, nodes[0]]),
 ) as Record<string, NodeKey>;
-
-function fieldMap(rows: FieldRow[]): Card['fields'] {
-  const result: Card['fields'] = {};
-  for (const row of rows) if (isNode(row.node)) {
-    result[row.node] = { value: row.value ?? '', state: row.state as 'empty' | 'suggested' | 'confirmed',
-      notApplicable: row.notApplicable, source: row.source ?? undefined,
-      sourceQuote: row.sourceQuote ?? undefined, sourceTurnId: row.sourceTurnId?.toString() };
-  }
-  return result;
-}
 
 function question(node: NodeKey | null, wording?: string | null) {
   return node ? { field: Object.entries(workspaceToNode).find(([, key]) => key === node)?.[0] ?? 'need',
@@ -126,16 +115,11 @@ export async function updateTask(taskId: string, input: unknown) {
   return response(taskId);
 }
 
-export async function getTaskScore(taskId: string) {
-  const [row] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1);
-  if (!row) throw new ApiError(404, 'NOT_FOUND', 'Задача не найдена');
-  const fields = await db.select().from(taskFields).where(eq(taskFields.taskId, taskId));
-  return score({ fields: fieldMap(fields), neededRoles: row.neededRoles, neededSkills: row.neededSkills });
-}
+export { getScore as getTaskScore } from '@/features/task-card/api/get-score';
 
 export async function publishTask(taskId: string) {
   await db.transaction(async tx => {
-    const [row] = await tx.update(tasks).set({ status: 'published', updatedAt: new Date() }).where(and(eq(tasks.id, taskId), eq(tasks.status, 'draft'))).returning();
+    const [row] = await tx.update(tasks).set({ status: 'published', publishedAt: new Date(), updatedAt: new Date() }).where(and(eq(tasks.id, taskId), eq(tasks.status, 'draft'))).returning();
     if (!row) throw new ApiError(409, 'INVALID_STATE', 'Задачу нельзя опубликовать');
     await tx.update(grillSessions).set({ status: 'finished', currentNode: null, currentBlock: null }).where(eq(grillSessions.taskId, taskId));
   });

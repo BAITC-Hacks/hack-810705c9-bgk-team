@@ -10,6 +10,7 @@ import {
   type GrillSessionState,
   type NextStep,
 } from '@/entities/grill/model';
+import { recalculateScore } from '@/features/task-card/api/recalculate-score';
 import { db } from '@/shared/db';
 import { criterion, grillSession, grillTurn, taskField } from '@/shared/db/schema';
 import type {
@@ -63,7 +64,7 @@ const questions: Record<string, string> = {
 const answerOptions = ['Кратко', 'Списком', 'На примере'];
 
 function serialized(value: unknown): string {
-  return JSON.stringify(value) ?? String(value);
+  return typeof value === 'string' ? value : JSON.stringify(value) ?? String(value);
 }
 
 function displayValue(value: unknown): string {
@@ -295,7 +296,8 @@ export async function checkpoint(taskId: string, input: GrillCheckpointInput) {
           .where(and(eq(taskField.taskId, taskId), eq(taskField.source, 'draft'), eq(taskField.state, 'suggested')));
         await tx.update(criterion).set({ state: 'confirmed', updatedAt: new Date() }).where(eq(criterion.taskId, taskId));
       }
-      const updated = await advanceVersion(tx, session);
+      await recalculateScore(tx, taskId, 'task');
+    const updated = await advanceVersion(tx, session);
       await tx.update(grillSession).set({ draftCheckpointState: input.action === 'confirm' ? 'confirmed' : 'pending' }).where(eq(grillSession.id, session.id));
       if (input.action === 'edit') return { next: { kind: 'checkpoint', block: 'draft' }, sessionVersion: updated.version };
       const refreshed = (await tx.select().from(grillSession).where(eq(grillSession.id, session.id)).limit(1))[0];
@@ -314,6 +316,7 @@ export async function checkpoint(taskId: string, input: GrillCheckpointInput) {
         }
       }
     }
+    await recalculateScore(tx, taskId, 'task');
     const updated = await advanceVersion(tx, session);
     if (input.action === 'edit') {
       return { next: { kind: 'checkpoint', block: input.block }, sessionVersion: updated.version, fields: await readFields(tx, taskId) };
@@ -376,6 +379,7 @@ export async function patchField(taskId: string, node: string, input: EditGrillF
       if (node === 'criteria.items') await tx.update(criterion).set({ state: 'confirmed', updatedAt: new Date() }).where(eq(criterion.taskId, taskId));
       else await tx.update(taskField).set({ state: 'confirmed', confirmedAt: new Date(), updatedAt: new Date() }).where(and(eq(taskField.taskId, taskId), eq(taskField.node, node)));
     }
+    await recalculateScore(tx, taskId, 'task');
     return { fields: await readFields(tx, taskId), sessionVersion: updatedSession.version };
   });
 }
