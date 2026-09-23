@@ -26,10 +26,13 @@ Cookie можно подделать, поэтому проверки роли �
 TEAM='tm_role=team; tm_actor=7e3a0000-0000-4000-8000-000000000002'   # DataBrew
 curl -i -X POST -b "$TEAM" localhost:3000/api/proposals/demo-proposal-pixelux/decision -d '{"action":"accept"}'
 curl -i -X POST -b "$TEAM" localhost:3000/api/stages/demo-stage-botforge/claim
+curl -i -X POST -b "$TEAM" localhost:3000/api/stages/demo-stage-botforge-claimed/confirm
 curl -i -b "$TEAM" 'localhost:3000/api/ai-log?taskId=demo-task-delivery-bot'
 ```
 
-Существующий переключатель «Бизнес / Студент» рабочего пространства пока живёт в памяти вкладки и не связан с cookie; связывание — задача интеграции.
+Без валидных `tm_role` / `tm_actor` API отвечает `403` («Выберите демо-роль»), подстановки по умолчанию нет. На навигации по страницам `proxy.ts` сам ставит первого демо-бизнеса, поэтому UI и сервер видят одну роль.
+
+Переключатель «Бизнес / Студент» рабочего пространства берёт начальную роль из cookie и следует за переключателем демо-роли. Обратного направления нет: переключение внутри страницы меняет только её локальное состояние и не пишет cookie.
 
 ## Запуск
 
