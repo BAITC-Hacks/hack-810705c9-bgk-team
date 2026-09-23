@@ -1,7 +1,18 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
+  AssistantRuntimeProvider,
+  ComposerPrimitive,
+  ThreadPrimitive,
+  useAui,
+  useAuiState,
+  useExternalStoreRuntime,
+  type AppendMessage,
+  type ThreadMessageLike,
+} from "@assistant-ui/react";
+import {
+  ArrowDown,
   ArrowUp,
   At,
   FileText,
@@ -18,11 +29,6 @@ import {
   type Task,
   type TaskField,
 } from "@/entities/workspace";
-import {
-  Conversation,
-  ConversationContent,
-  ConversationScrollButton,
-} from "@/shared/components/ai-elements/conversation";
 import { Button } from "@/shared/components/ui/button";
 import {
   Dialog,
@@ -39,6 +45,7 @@ import {
   removeMention,
   type ChatSkillId,
 } from "./chat-skills";
+import { AssistantAvatar, AssistantMessage, UserMessage } from "./chat-messages";
 import { analyzeTaskLocally } from "./local-ai-analysis";
 import { useAsyncAction } from "@/shared/hooks/use-async-action";
 import { useSpeechInput } from "@/shared/hooks/use-speech-input";
@@ -82,23 +89,76 @@ const CHAT_OPTIONS = [
 
 type ChatOption = (typeof CHAT_OPTIONS)[number];
 
-export function ChatPanel({
+type Submit = (text: string, field?: TaskField, skill?: ChatSkillId) => Promise<boolean>;
+
+const PENDING_MESSAGE_ID = "pending-user-message";
+
+function convertMessage(message: Message): ThreadMessageLike {
+  return { id: message.id, role: message.role, content: message.content };
+}
+
+function appendedText(message: AppendMessage) {
+  return message.content
+    .map((part) => (part.type === "text" ? part.text : ""))
+    .join("")
+    .trim();
+}
+
+/** assistant-ui renders the thread; the workspace page stays the owner of message history. */
+export function ChatPanel(props: Props) {
+  const { messages, onSend } = props;
+  const { pending, error, run } = useAsyncAction();
+  const [pendingText, setPendingText] = useState<string | null>(null);
+  const threadMessages = useMemo(
+    () => pending && pendingText !== null
+      ? [...messages, { id: PENDING_MESSAGE_ID, role: "user" as const, content: pendingText }]
+      : messages,
+    [messages, pending, pendingText],
+  );
+
+  const submit = useCallback<Submit>(async (text, field, skill) => {
+    const skillLabel = CHAT_SKILLS.find((item) => item.id === skill)?.label;
+    setPendingText(skill ? `@${skillLabel}${text ? `\n${text}` : ""}` : text);
+    try {
+      return await run(() => onSend(text, field, skill));
+    } finally {
+      setPendingText(null);
+    }
+  }, [onSend, run]);
+
+  const runtime = useExternalStoreRuntime<Message>({
+    messages: threadMessages,
+    isRunning: pending,
+    convertMessage,
+    onNew: async (message) => {
+      await submit(appendedText(message));
+    },
+  });
+
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <ChatThread {...props} pending={pending} error={error} submit={submit} />
+    </AssistantRuntimeProvider>
+  );
+}
+
+function ChatThread({
   task,
-  messages,
-  onSend,
   onEdit,
   onShowProposals,
   onShowShortcuts,
   documents,
   onShowDocuments,
-}: Props) {
-  const [input, setInput] = useState("");
-  const inputValueRef = useRef("");
+  pending,
+  error,
+  submit,
+}: Omit<Props, "messages" | "onSend"> & { pending: boolean; error: string; submit: Submit }) {
+  const aui = useAui();
+  const input = useAuiState((state) => state.composer.text);
+  const setInput = useCallback((text: string) => aui.composer.setText(text), [aui]);
   const [voiceRemainder, setVoiceRemainder] = useState("");
-  const { pending, error, run } = useAsyncAction();
   const voice = useSpeechInput(task.id, (text) => {
-    const result = appendVoiceTranscript(inputValueRef.current, text);
-    inputValueRef.current = result.text;
+    const result = appendVoiceTranscript(aui.composer.getState().text, text);
     setInput(result.text);
     if (result.remainder) {
       setVoiceRemainder((current) => [current, result.remainder].filter(Boolean).join(" "));
@@ -138,8 +198,6 @@ export function ChatPanel({
   const activeOptionId = options[activeIndex]
     ? `${menuId}-${options[activeIndex].id}`
     : undefined;
-
-  useEffect(() => { inputValueRef.current = input; }, [input]);
 
   useEffect(() => {
     if (voiceRemainder && voiceBusy) stopVoice();
@@ -186,26 +244,30 @@ export function ChatPanel({
 
   async function send() {
     if (composerBusy || voiceRemainder) return;
-    if (!input.trim() && !selectedSkill) return;
-    if (!await run(() => onSend(
-      input.trim(),
-      selectedSkill ? undefined : answerField,
-      selectedSkill,
-    ))) return;
+    const draft = { text: input, field: answerField, skill: selectedSkill };
+    if (!draft.text.trim() && !draft.skill) return;
+    // Clear optimistically like a chat; restore the draft if the turn fails.
     setInput("");
     setAnswerField(undefined);
     setSelectedSkill(undefined);
     setMenuMode(null);
     setCaret(0);
+    const sent = await submit(
+      draft.text.trim(),
+      draft.skill ? undefined : draft.field,
+      draft.skill,
+    );
+    if (!sent) {
+      setInput(draft.text);
+      setAnswerField(draft.field);
+      setSelectedSkill(draft.skill);
+    }
     requestAnimationFrame(() => inputRef.current?.focus());
   }
   return (
-    <div className="flex min-h-0 flex-1 flex-col" data-voice-active={voice.busy}>
-      <Conversation className="min-h-0 overflow-hidden">
-        <ConversationContent
-          scrollClassName="workspace-scroll"
-          className="mx-auto w-full max-w-[960px] gap-7 px-5 py-7 lg:px-10"
-        >
+    <ThreadPrimitive.Root className="relative flex min-h-0 flex-1 flex-col" data-voice-active={voice.busy}>
+      <ThreadPrimitive.Viewport className="workspace-scroll min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-[960px] flex-col gap-7 px-5 py-7 lg:px-10">
           <div className="ml-auto max-w-[85%]">
             <p className="mb-2 text-right text-xs font-medium text-muted-foreground">
               Вы · исходная идея
@@ -215,6 +277,7 @@ export function ChatPanel({
             </div>
           </div>
           <div className="flex items-start gap-3">
+            <AssistantAvatar />
             <div className="min-w-0 flex-1">
               <div className="mb-3 flex items-center gap-2">
                 <span className="text-[15px] font-bold">AI-Sana</span>
@@ -318,32 +381,23 @@ export function ChatPanel({
               )}
             </div>
           </div>
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={cn(
-                "workspace-enter flex gap-3",
-                message.role === "user" && "justify-end",
-              )}
-            >
-              <div
-                className={cn(
-                  "max-w-[90%] whitespace-pre-wrap text-[15px] leading-[1.7]",
-                  message.role === "user"
-                    ? "rounded-2xl bg-secondary px-5 py-4"
-                    : "pt-1",
-                )}
-              >
-                {message.content}
-              </div>
-            </div>
-          ))}
-        </ConversationContent>
-        <ConversationScrollButton aria-label="К последнему сообщению" />
-      </Conversation>
-      <div className="mx-auto w-full max-w-[960px] shrink-0 px-4 pt-3 pb-3 lg:px-9">
+          <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
+        </div>
+      </ThreadPrimitive.Viewport>
+      <div className="relative mx-auto w-full max-w-[960px] shrink-0 px-4 pt-3 pb-3 lg:px-9">
+        <ThreadPrimitive.ScrollToBottom asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            aria-label="К последнему сообщению"
+            className="absolute -top-11 left-1/2 z-10 size-9 -translate-x-1/2 rounded-full bg-card shadow-sm disabled:invisible"
+          >
+            <ArrowDown className="size-4" />
+          </Button>
+        </ThreadPrimitive.ScrollToBottom>
         {error && <p id="chat-save-error" role="alert" className="mb-2 text-sm text-destructive">{error}</p>}
-        <form
+        <ComposerPrimitive.Root
           ref={composerRef}
           onBlur={(event) => {
             if (!event.currentTarget.contains(event.relatedTarget))
@@ -476,12 +530,16 @@ export function ChatPanel({
           <label htmlFor="chat-message" className="sr-only">
             {field ? `Ответ: ${field.label}` : "Сообщение ассистенту"}
           </label>
-          <textarea
+          <ComposerPrimitive.Input
             disabled={pending}
             readOnly={voice.busy}
             id="chat-message"
             ref={inputRef}
-            value={input}
+            submitMode="none"
+            cancelOnEscape={false}
+            addAttachmentOnPaste={false}
+            minRows={2}
+            maxRows={12}
             role="combobox"
             aria-autocomplete="list"
             aria-expanded={menuOpen}
@@ -539,7 +597,6 @@ export function ChatPanel({
                 send();
               }
             }}
-            rows={2}
             maxLength={4000}
             placeholder={
               field
@@ -643,12 +700,12 @@ export function ChatPanel({
               <button type="button" disabled={voice.busy} onClick={() => setVoiceRemainder("")} className="mt-2 font-semibold underline underline-offset-4 disabled:opacity-50">Проверено — продолжить с текстом в поле</button>
             </div>
           )}
-        </form>
+        </ComposerPrimitive.Root>
         <p className="mt-2 text-center text-[11px] leading-normal text-muted-foreground">
           Проверьте и подтвердите карточку перед публикацией.
         </p>
       </div>
-    </div>
+    </ThreadPrimitive.Root>
   );
 }
 

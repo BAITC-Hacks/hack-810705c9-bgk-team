@@ -18,6 +18,7 @@
     "db:seed:task-match": "bun scripts/seed-task-match.ts"
   },
   "dependencies": {
+    "@assistant-ui/react": "^0.15.21",
     "@aws-sdk/client-s3": "3.1138.0",
     "@base-ui/react": "^1.8.0",
     "@gravity-ui/icons": "^2.22.0",
