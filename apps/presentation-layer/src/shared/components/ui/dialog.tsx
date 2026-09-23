@@ -3,7 +3,7 @@ import { cn } from "cn"
 import { Dialog as DialogPrimitive } from "radix-ui"
 
 import { Button } from "@/shared/components/ui/button"
-import { XIcon } from "lucide-react"
+import { Xmark } from "@gravity-ui/icons"
 
 function Dialog({
   ...props
@@ -72,9 +72,8 @@ function DialogContent({
               className="absolute top-2 right-2"
               size="icon-sm"
             >
-              <XIcon
-              />
-              <span className="sr-only">Close</span>
+              <Xmark aria-hidden="true" />
+              <span className="sr-only">Закрыть</span>
             </Button>
           </DialogPrimitive.Close>
         )}
@@ -113,7 +112,7 @@ function DialogFooter({
       {children}
       {showCloseButton && (
         <DialogPrimitive.Close asChild>
-          <Button variant="outline">Close</Button>
+          <Button variant="outline">Закрыть</Button>
         </DialogPrimitive.Close>
       )}
     </div>

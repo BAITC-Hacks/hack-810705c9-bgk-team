@@ -3,7 +3,7 @@ import { cn } from "cn"
 import { Dialog as SheetPrimitive } from "radix-ui"
 
 import { Button } from "@/shared/components/ui/button"
-import { XIcon } from "lucide-react"
+import { Xmark } from "@gravity-ui/icons"
 
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />
@@ -73,9 +73,8 @@ function SheetContent({
               className="absolute top-3 right-3"
               size="icon-sm"
             >
-              <XIcon
-              />
-              <span className="sr-only">Close</span>
+              <Xmark aria-hidden="true" />
+              <span className="sr-only">Закрыть</span>
             </Button>
           </SheetPrimitive.Close>
         )}

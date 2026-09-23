@@ -3,7 +3,7 @@
 import { Button } from "@/shared/components/ui/button";
 import { cn } from "@/shared/lib/utils";
 import type { UIMessage } from "ai";
-import { ArrowDownIcon, DownloadIcon } from "lucide-react";
+import { ArrowDown, ArrowDownToLine } from "@gravity-ui/icons";
 import type { ComponentProps } from "react";
 import { useCallback } from "react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
@@ -92,9 +92,10 @@ export const ConversationScrollButton = ({
         size="icon"
         type="button"
         variant="outline"
+        aria-label="К последним сообщениям"
         {...props}
       >
-        <ArrowDownIcon className="size-4" />
+        <ArrowDown className="size-4" aria-hidden="true" />
       </Button>
     )
   );
@@ -160,9 +161,10 @@ export const ConversationDownload = ({
       size="icon"
       type="button"
       variant="outline"
+      aria-label="Скачать диалог"
       {...props}
     >
-      {children ?? <DownloadIcon className="size-4" />}
+      {children ?? <ArrowDownToLine className="size-4" aria-hidden="true" />}
     </Button>
   );
 };
