@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
+    "@gravity-ui/icons": "^2.22.0",
     "@hallelx/youtube-transcript": "^0.2.0",
     "@huggingface/transformers": "^4.3.0",
     "@mastra/client-js": "^1.47.0",

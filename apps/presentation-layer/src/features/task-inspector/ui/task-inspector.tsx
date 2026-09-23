@@ -3,32 +3,22 @@
 import { useId, useState, type ChangeEvent, type FormEvent } from "react";
 import {
   ArrowUpRight,
-  CalendarDays,
-  Check,
-  CheckCheck,
+  ArrowUturnCcwLeft,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
-  CircleCheck,
-  Clock3,
-  FileText,
-  LayoutGrid,
-  List,
-  MessageSquare,
-  Send,
-  Target,
-  Trophy,
-  Undo2,
-  Users,
-  X,
-} from "lucide-react";
+  LayoutCellsLarge,
+  LayoutList,
+  Xmark,
+} from "@gravity-ui/icons";
 import {
+  TASK_FIELDS,
   calculateScore,
   readiness,
   type Proposal,
   type Task,
   type Team,
 } from "@/entities/workspace";
-import { Badge } from "@/shared/components/ui/badge";
 import { Button } from "@/shared/components/ui/button";
 import {
   Dialog,
@@ -64,15 +54,9 @@ export type TaskInspectorProps = {
 };
 
 const proposalStatus = {
-  pending: {
-    label: "На рассмотрении",
-    className: "bg-muted text-muted-foreground",
-  },
-  selected: {
-    label: "Команда выбрана",
-    className: "bg-emerald-50 text-emerald-700",
-  },
-  rejected: { label: "Отклонён", className: "bg-rose-50 text-rose-700" },
+  pending: "На рассмотрении",
+  selected: "Команда выбрана",
+  rejected: "Отклонён",
 };
 
 function safePrototypeUrl(value: string): string | null {
@@ -86,15 +70,11 @@ function safePrototypeUrl(value: string): string | null {
   }
 }
 
-function StatusBadge({ status }: { status: Proposal["status"] }) {
-  const item = proposalStatus[status];
+function StatusLabel({ status }: { status: Proposal["status"] }) {
   return (
-    <Badge
-      variant="secondary"
-      className={cn("h-6 px-2.5 text-[11px] font-medium", item.className)}
-    >
-      {item.label}
-    </Badge>
+    <span className="text-xs font-medium text-foreground">
+      {proposalStatus[status]}
+    </span>
   );
 }
 
@@ -103,10 +83,9 @@ function TeamAvatar({ team, small = false }: { team: Team; small?: boolean }) {
     <div
       aria-hidden="true"
       className={cn(
-        "flex shrink-0 items-center justify-center rounded-full font-semibold text-[#413654]",
-        small ? "size-10 text-xs" : "size-12 text-sm",
+        "flex shrink-0 items-center justify-center rounded-md bg-muted font-medium text-foreground",
+        small ? "size-8 text-xs" : "size-10 text-sm",
       )}
-      style={{ backgroundColor: team.color }}
     >
       {team.initials}
     </div>
@@ -130,27 +109,20 @@ function ProposalDetails({ proposal }: { proposal: Proposal }) {
       </section>
       <section className="space-y-2.5">
         <h4 className="text-xs font-semibold">План работы</h4>
-        <ol className="space-y-2.5">
+        <ol className="list-decimal space-y-2.5 pl-4 marker:text-muted-foreground">
           {steps.map((step, index) => (
             <li
               key={`${index}-${step}`}
-              className="flex gap-2.5 text-[13px] leading-relaxed text-foreground/80"
+              className="break-words pl-1 text-[13px] leading-relaxed text-foreground/80"
             >
-              <span
-                aria-hidden="true"
-                className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground"
-              >
-                {index + 1}
-              </span>
-              <span className="min-w-0 break-words">{step}</span>
+              {step}
             </li>
           ))}
         </ol>
       </section>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-xs">
-        <span className="flex min-w-0 items-start gap-2 text-muted-foreground">
-          <CalendarDays className="size-3.5 shrink-0" aria-hidden="true" />
-          <span className="break-words">{proposal.timeline}</span>
+        <span className="min-w-0 break-words text-muted-foreground">
+          Срок: {proposal.timeline}
         </span>
         {prototypeUrl ? (
           <a
@@ -205,7 +177,7 @@ function BusinessInspector({
             className="flex items-center gap-2 text-[15px] font-semibold tracking-tight"
           >
             Команды и отклики{" "}
-            <span className="flex size-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
+            <span className="text-xs font-normal text-muted-foreground">
               {taskProposals.length}
             </span>
           </h2>
@@ -216,37 +188,34 @@ function BusinessInspector({
         <div
           role="group"
           aria-label="Вид откликов"
-          className="flex shrink-0 rounded-lg border bg-background p-0.5"
+          className="flex shrink-0 gap-0.5"
         >
           <Button
             variant="ghost"
             size="icon-xs"
             aria-label="Карточки откликов"
             aria-pressed={view === "cards"}
-            className={cn(view === "cards" && "bg-primary/10 text-primary")}
+            className={cn(view === "cards" && "bg-muted text-foreground")}
             onClick={() => setView("cards")}
           >
-            <LayoutGrid className="size-3.5" />
+            <LayoutCellsLarge className="size-4" />
           </Button>
           <Button
             variant="ghost"
             size="icon-xs"
             aria-label="Список откликов"
             aria-pressed={view === "list"}
-            className={cn(view === "list" && "bg-primary/10 text-primary")}
+            className={cn(view === "list" && "bg-muted text-foreground")}
             onClick={() => setView("list")}
           >
-            <List className="size-3.5" />
+            <LayoutList className="size-4" />
           </Button>
         </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5">
         {!proposal ? (
-          <div className="flex min-h-72 flex-col items-center justify-center rounded-xl border border-dashed bg-background/70 px-5 py-9 text-center">
-            <div className="mb-4 flex size-11 items-center justify-center rounded-full bg-primary/8 text-primary">
-              <MessageSquare className="size-5" aria-hidden="true" />
-            </div>
+          <div className="flex min-h-72 flex-col items-center justify-center px-5 py-9 text-center">
             <h3 className="text-sm font-semibold">Пока без откликов</h3>
             <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
               {task.status === "draft"
@@ -255,12 +224,12 @@ function BusinessInspector({
             </p>
             {task.status === "draft" ? (
               <Button className="mt-5" variant="outline" onClick={onEditTask}>
-                Дополнить задачу <ArrowUpRight className="size-3.5" />
+                Дополнить задачу
               </Button>
             ) : null}
           </div>
         ) : view === "list" ? (
-          <div className="space-y-2.5">
+          <div className="divide-y">
             {taskProposals.map((item) => {
               const proposalTeam = teams.find(
                 (candidate) => candidate.id === item.teamId,
@@ -273,15 +242,13 @@ function BusinessInspector({
                     setActiveProposalId(item.id);
                     setView("cards");
                   }}
-                  className="group w-full rounded-xl border bg-background p-4 text-left transition-colors hover:border-primary/40 hover:bg-primary/[0.025] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  className="group w-full px-1 py-4 text-left transition-colors hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                   aria-label={`Открыть отклик команды ${proposalTeam?.name ?? "Команда"}`}
                 >
                   <div className="flex items-center gap-3">
                     {proposalTeam ? (
                       <TeamAvatar team={proposalTeam} small />
-                    ) : (
-                      <Users className="size-5 text-muted-foreground" />
-                    )}
+                    ) : null}
                     <div className="min-w-0 flex-1">
                       <h3 className="truncate text-sm font-semibold">
                         {proposalTeam?.name ?? "Команда"}
@@ -298,7 +265,7 @@ function BusinessInspector({
                   <p className="mb-3 mt-3 line-clamp-2 break-words text-xs leading-relaxed text-muted-foreground">
                     {item.idea}
                   </p>
-                  <StatusBadge status={item.status} />
+                  <StatusLabel status={item.status} />
                 </button>
               );
             })}
@@ -306,18 +273,14 @@ function BusinessInspector({
         ) : (
           <>
             <article
-              className="rounded-xl border bg-background p-4 shadow-[0_2px_8px_-6px_rgba(30,24,55,0.12)]"
+              className="py-1"
               aria-label={`Отклик команды ${team?.name ?? "Команда"}`}
             >
               <div className="mb-4 border-b pb-4">
                 <div className="mb-3 flex items-center justify-between gap-3">
-                  {team ? (
-                    <TeamAvatar team={team} />
-                  ) : (
-                    <Users className="size-8 text-primary" />
-                  )}
+                  {team ? <TeamAvatar team={team} /> : null}
                   {proposal.status !== "pending" ? (
-                    <StatusBadge status={proposal.status} />
+                    <StatusLabel status={proposal.status} />
                   ) : (
                     <span className="text-[10px] text-muted-foreground">
                       Отклик команды
@@ -331,17 +294,9 @@ function BusinessInspector({
                   {team?.members ?? 0} в команде ·{" "}
                   {team?.tagline ?? "Готовы предложить своё решение"}
                 </p>
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {team?.skills.map((skill) => (
-                    <Badge
-                      key={skill}
-                      variant="outline"
-                      className="h-5 bg-muted/50 px-2 text-[10px] font-normal text-foreground/75"
-                    >
-                      {skill}
-                    </Badge>
-                  ))}
-                </div>
+                <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+                  {team?.skills.join(" · ")}
+                </p>
               </div>
               <ProposalDetails proposal={proposal} />
               <div className="mt-5" aria-live="polite">
@@ -349,17 +304,15 @@ function BusinessInspector({
                   <div className="grid grid-cols-[0.85fr_1.15fr] gap-2">
                     <Button
                       variant="outline"
-                      className="h-9 gap-1.5 border-rose-200 px-2 text-xs text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                      className="h-9 px-2 text-xs"
                       onClick={() => onDecision(proposal.id, "rejected")}
                     >
-                      <X className="size-3.5" />
                       Отклонить
                     </Button>
                     <Button
                       className="h-9 gap-1.5 px-2 text-xs"
                       onClick={() => onDecision(proposal.id, "selected")}
                     >
-                      <Check className="size-3.5" />
                       Выбрать команду
                     </Button>
                   </div>
@@ -369,15 +322,14 @@ function BusinessInspector({
                     className="h-9 w-full text-xs"
                     onClick={() => onDecision(proposal.id, "pending")}
                   >
-                    <Undo2 className="size-3.5" />
+                    <ArrowUturnCcwLeft className="size-4" aria-hidden="true" />
                     Отменить решение
                   </Button>
                 )}
                 {proposal.status === "selected" ? (
-                  <div className="mt-3 rounded-lg bg-primary/[0.045] p-3">
+                  <div className="mt-4 border-t pt-4">
                     {proposal.milestoneConfirmed ? (
-                      <p className="flex items-center gap-2 text-xs font-medium text-primary">
-                        <Trophy className="size-4" />
+                      <p className="text-xs font-medium text-foreground">
                         Этап подтверждён · +10 баллов
                       </p>
                     ) : (
@@ -388,10 +340,9 @@ function BusinessInspector({
                         </p>
                         <Button
                           variant="outline"
-                          className="h-8 w-full bg-background text-xs"
+                          className="h-8 w-full bg-card text-xs"
                           onClick={() => onMilestone(proposal.id)}
                         >
-                          <CircleCheck className="size-3.5" />
                           Подтвердить этап
                         </Button>
                       </>
@@ -407,7 +358,7 @@ function BusinessInspector({
               <Button
                 variant="outline"
                 size="icon"
-                className="size-9 bg-background/60"
+                className="size-9 bg-card/60"
                 aria-label="Предыдущий отклик"
                 disabled={activeIndex === 0}
                 onClick={() =>
@@ -425,7 +376,7 @@ function BusinessInspector({
               <Button
                 variant="outline"
                 size="icon"
-                className="size-9 bg-background/60"
+                className="size-9 bg-card/60"
                 aria-label="Следующий отклик"
                 disabled={activeIndex === taskProposals.length - 1}
                 onClick={() =>
@@ -533,7 +484,6 @@ function ApplicationDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button className="h-10 w-full text-xs">
-          <Send className="size-3.5" />
           Предложить решение
         </Button>
       </DialogTrigger>
@@ -548,7 +498,7 @@ function ApplicationDialog({
             className="absolute right-3 top-3"
             aria-label="Закрыть форму отклика"
           >
-            <X className="size-4" />
+            <Xmark className="size-4" />
           </Button>
         </DialogClose>
         <DialogHeader className="pr-6">
@@ -619,7 +569,6 @@ function ApplicationDialog({
               </Button>
             </DialogClose>
             <Button type="submit" className="h-9">
-              <Send className="size-3.5" />
               Отправить отклик
             </Button>
           </DialogFooter>
@@ -642,12 +591,6 @@ function StudentInspector({
   );
   const score = calculateScore(task);
   const readinessState = readiness(score);
-  const readinessTone = {
-    muted: "bg-muted text-muted-foreground",
-    amber: "bg-amber-50 text-amber-700",
-    green: "bg-emerald-50 text-emerald-700",
-    violet: "bg-primary/10 text-primary",
-  }[readinessState.tone];
 
   return (
     <>
@@ -658,16 +601,13 @@ function StudentInspector({
         >
           О задаче
         </h2>
-        <p className="mt-1.5 text-xs text-muted-foreground">
-          От идеи к первому результату
-        </p>
       </div>
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-5 pb-5">
-        <section className="rounded-xl border bg-background p-4">
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-5 pb-5">
+        <section>
           <div className="mb-3 flex items-center justify-between gap-2">
-            <Badge variant="outline" className="text-[10px] font-normal">
+            <span className="text-xs text-muted-foreground">
               {task.industry}
-            </Badge>
+            </span>
             <span className="text-[10px] text-muted-foreground">
               {task.status === "published" ? "Опубликована" : "Черновик"}
             </span>
@@ -697,12 +637,9 @@ function StudentInspector({
                 style={{ width: `${score}%` }}
               />
             </div>
-            <Badge
-              variant="secondary"
-              className={cn("h-5 text-[10px]", readinessTone)}
-            >
+            <p className="text-xs text-foreground">
               {readinessState.label}
-            </Badge>
+            </p>
             <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
               На опубликованную задачу можно откликнуться при любой готовности и
               уточнить детали вместе с бизнесом.
@@ -711,29 +648,25 @@ function StudentInspector({
         </section>
 
         <section
-          className="space-y-5 rounded-xl border bg-background p-4"
+          className="space-y-5 border-t pt-5"
           aria-label="Ключевые детали задачи"
         >
           {[
             {
-              icon: Target,
               label: "Ожидаемый результат",
               value: task.fields.outcome,
             },
             {
-              icon: CircleCheck,
               label: "Критерий успеха",
               value: task.fields.success,
             },
             {
-              icon: FileText,
               label: "Данные и материалы",
               value: task.fields.data,
             },
-          ].map(({ icon: Icon, label, value }) => (
+          ].map(({ label, value }) => (
             <div key={label}>
-              <h3 className="mb-2 flex items-center gap-2 text-xs font-semibold">
-                <Icon className="size-3.5 text-primary/80" aria-hidden="true" />
+              <h3 className="mb-2 text-xs font-semibold">
                 {label}
               </h3>
               <p
@@ -750,7 +683,36 @@ function StudentInspector({
           ))}
         </section>
 
-        <section className="rounded-xl border bg-background p-4">
+        <details className="group border-t pt-5">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-sm text-xs font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+            Все сведения
+            <ChevronDown
+              className="size-4 text-muted-foreground transition-transform group-open:rotate-180"
+              aria-hidden="true"
+            />
+          </summary>
+          <dl className="mt-4 space-y-4">
+            {TASK_FIELDS.filter(
+              ({ key }) => !["outcome", "success", "data"].includes(key),
+            ).map(({ key, label }) => (
+              <div key={key}>
+                <dt className="mb-1.5 text-xs font-semibold">{label}</dt>
+                <dd
+                  className={cn(
+                    "whitespace-pre-line break-words text-xs leading-relaxed",
+                    task.fields[key].trim()
+                      ? "text-foreground/80"
+                      : "italic text-muted-foreground",
+                  )}
+                >
+                  {task.fields[key].trim() || "Нужно уточнить с бизнесом"}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+
+        <section className="border-t pt-5">
           <h3 className="mb-3 text-xs font-semibold">
             {proposal ? "Ваш отклик" : "Ваше решение"}
           </h3>
@@ -767,7 +729,7 @@ function StudentInspector({
           ) : null}
           {proposal ? (
             <div className="space-y-4">
-              <StatusBadge status={proposal.status} />
+              <StatusLabel status={proposal.status} />
               <p className="text-xs leading-relaxed text-muted-foreground">
                 {proposal.status === "selected"
                   ? "Бизнес выбрал вашу команду. Договоритесь о первом шаге и покажите результат."
@@ -779,15 +741,13 @@ function StudentInspector({
                 <ProposalDetails proposal={proposal} />
               </div>
               {proposal.milestoneConfirmed ? (
-                <p className="flex items-center gap-2 rounded-lg bg-primary/5 p-3 text-xs font-medium text-primary">
-                  <CheckCheck className="size-4" />
+                <p className="text-xs font-medium text-foreground">
                   Этап подтверждён · +10 баллов
                 </p>
               ) : null}
             </div>
           ) : task.status === "draft" ? (
-            <p className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
-              <Clock3 className="mt-0.5 size-4 shrink-0" />
+            <p className="text-xs leading-relaxed text-muted-foreground">
               Отклик станет доступен после публикации задачи.
             </p>
           ) : team ? (
@@ -812,7 +772,7 @@ function StudentInspector({
 export function TaskInspector(props: TaskInspectorProps) {
   return (
     <aside
-      className="flex h-full min-h-0 min-w-0 flex-col rounded-xl border bg-[#f8f8fb]"
+      className="flex h-full min-h-0 min-w-0 flex-col bg-card"
       aria-labelledby="inspector-title"
     >
       {props.role === "business" ? (

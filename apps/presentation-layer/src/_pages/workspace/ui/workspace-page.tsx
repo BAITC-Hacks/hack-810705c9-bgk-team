@@ -1,18 +1,6 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
-import {
-  ArrowUpRight,
-  Asterisk,
-  BriefcaseBusiness,
-  ChevronRight,
-  CircleHelp,
-  GraduationCap,
-  List,
-  MessageSquare,
-  RotateCcw,
-  Users,
-} from "lucide-react";
 import { toast } from "sonner";
 import {
   calculateScore,
@@ -27,6 +15,8 @@ import {
 } from "@/entities/workspace";
 import { TaskEditor } from "@/features/task-editor";
 import { TaskInspector } from "@/features/task-inspector";
+import { StudentCatalog } from "@/features/student-catalog";
+import { TeamPicker } from "@/features/team-picker";
 import { Button } from "@/shared/components/ui/button";
 import {
   Dialog,
@@ -42,7 +32,7 @@ import {
 } from "@/shared/components/ui/resizable";
 import { Toaster } from "@/shared/components/ui/sonner";
 import { cn } from "@/shared/lib/utils";
-import { ChatPanel, TaskDetails } from "./chat-panel";
+import { ChatPanel } from "./chat-panel";
 import { NewTaskDialog } from "./new-task-dialog";
 import { TaskNavigation } from "./task-navigation";
 
@@ -63,8 +53,6 @@ export default function WorkspacePage() {
   const [status, setStatus] = useState<"published" | "draft">("published");
   const [tab, setTab] = useState<"assistant" | "card">("assistant");
   const [query, setQuery] = useState("");
-  const [industry, setIndustry] = useState("");
-  const [readinessFilter, setReadinessFilter] = useState("");
   const [conversations, setConversations] = useState<Record<string, Message[]>>(
     {},
   );
@@ -88,7 +76,7 @@ export default function WorkspacePage() {
       ? (taskDrafts[canonicalTask.id] ?? canonicalTask)
       : canonicalTask;
   const team = data.teams.find((item) => item.id === teamId) ?? data.teams[0];
-  const conversationKey = `${role}:${role === "student" ? teamId : "business"}:${task.id}`;
+  const conversationKey = task.id;
   const messages = conversations[conversationKey] ?? [];
   const points =
     data.proposals.filter(
@@ -99,8 +87,6 @@ export default function WorkspacePage() {
     setRole(next);
     setTab("assistant");
     setQuery("");
-    setIndustry("");
-    setReadinessFilter("");
     setStatus("published");
     if (task.status !== "published")
       setSelectedId(
@@ -137,7 +123,7 @@ export default function WorkspacePage() {
 
   function sendMessage(text: string, field?: TaskField) {
     let response = "";
-    if (role === "business" && field) {
+    if (field) {
       const label = TASK_FIELDS.find((item) => item.key === field)?.label;
       const update = (item: Task): Task => ({
         ...item,
@@ -158,31 +144,9 @@ export default function WorkspacePage() {
         }));
       }
       response = `Добавила ваш ответ в поле «${label}» без изменений.\n\nОткройте карточку, проверьте текст и подтвердите сведения — после этого пересчитается рейтинг.`;
-    } else if (role === "business") {
+    } else {
       response =
         "Уточнение осталось в этой беседе. В демо-режиме выберите один из вопросов выше, чтобы записать ответ в нужное поле, или откройте «Карточку задачи».\n\nЯ не добавляю неподтверждённые факты и не публикую задачу за вас.";
-    } else {
-      const normalized = text.toLocaleLowerCase("ru");
-      if (/данн|материал|источник/.test(normalized))
-        response =
-          task.fields.data ||
-          "Бизнес пока не описал доступные данные. Укажите в своём предложении, что понадобится для проверки идеи.";
-      else if (/оцен|успех|критери|метрик/.test(normalized))
-        response =
-          task.fields.success ||
-          "Критерии успеха ещё не указаны. Предложите измеримый результат и согласуйте его с бизнесом.";
-      else if (/срок|огранич|технол/.test(normalized))
-        response =
-          task.fields.constraints ||
-          "Сроки и ограничения пока не указаны. Вы можете предложить их в отклике.";
-      else if (/контакт|связ|встреч/.test(normalized))
-        response =
-          [task.fields.contact, task.fields.interaction]
-            .filter(Boolean)
-            .join("\n\n") ||
-          "Контакт ещё не указан. Этот вопрос можно добавить в отклик.";
-      else
-        response = `По карточке бизнеса ожидаемый результат:\n${task.fields.outcome || task.fields.need || task.description}\n\nВ демонстрации я могу показать сведения о данных, сроках и критериях успеха. Для отклика нажмите «Предложить решение» справа.`;
     }
     setConversations((current) => ({
       ...current,
@@ -205,8 +169,6 @@ export default function WorkspacePage() {
     setSelectedId(next.tasks[0].id);
     setTeamId(next.teams[0].id);
     setQuery("");
-    setIndustry("");
-    setReadinessFilter("");
     setStatus("published");
     setTab("assistant");
     setShowDemo(false);
@@ -216,7 +178,6 @@ export default function WorkspacePage() {
 
   const navigation = (
     <TaskNavigation
-      role={role}
       tasks={data.tasks}
       selectedId={task.id}
       onSelect={selectTask}
@@ -230,19 +191,11 @@ export default function WorkspacePage() {
         const first = data.tasks.find((item) => item.status === next);
         if (first) selectTask(first.id);
       }}
-      industry={industry}
-      onIndustry={setIndustry}
-      readinessFilter={readinessFilter}
-      onReadiness={setReadinessFilter}
-      teams={data.teams}
-      activeTeamId={teamId}
-      onTeam={setTeamId}
-      points={points}
     />
   );
   const center = (
     <main
-      className="workspace-panel flex flex-col bg-white"
+      className="workspace-panel flex flex-col bg-card"
       aria-label="Работа с задачей"
     >
       <div className="shrink-0 px-6 pt-5 lg:px-7">
@@ -257,22 +210,7 @@ export default function WorkspacePage() {
               {task.title}
             </h1>
           </div>
-          <span
-            className={cn(
-              "mt-0.5 flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[9px] font-medium",
-              task.status === "published" && !hasDraftEdits
-                ? "bg-emerald-50 text-emerald-700"
-                : "bg-amber-50 text-amber-700",
-            )}
-          >
-            <span
-              className={cn(
-                "size-1 rounded-full",
-                task.status === "published" && !hasDraftEdits
-                  ? "bg-emerald-500"
-                  : "bg-amber-500",
-              )}
-            />
+          <span className="mt-1 shrink-0 text-[11px] text-muted-foreground">
             {hasDraftEdits
               ? "Есть изменения"
               : task.status === "published"
@@ -317,14 +255,13 @@ export default function WorkspacePage() {
               {label}
             </button>
           ))}
-          {role === "business" && tab === "assistant" && (
+          {tab === "assistant" && (
             <button
               type="button"
               onClick={() => setTab("card")}
               className="ml-auto mb-2 hidden items-center gap-1 text-[10px] text-primary xl:flex"
             >
               {task.status === "draft" ? "К публикации" : "Улучшить"}
-              <ArrowUpRight className="size-3" />
             </button>
           )}
         </div>
@@ -337,14 +274,13 @@ export default function WorkspacePage() {
       >
         {tab === "assistant" ? (
           <ChatPanel
-            key={`${role}:${task.id}:${teamId}`}
-            role={role}
+            key={task.id}
             task={task}
             messages={messages}
             onSend={sendMessage}
             onEdit={() => setTab("card")}
           />
-        ) : role === "business" ? (
+        ) : (
           <TaskEditor
             key={task.id}
             task={task}
@@ -352,113 +288,107 @@ export default function WorkspacePage() {
             onSave={saveTask}
             onCancel={() => setTab("assistant")}
           />
-        ) : (
-          <TaskDetails task={task} />
         )}
       </div>
     </main>
   );
   const inspector = (
-    <div className="workspace-panel bg-[#f8f8fa]">
-      <TaskInspector
-        role={role}
-        task={task}
-        teams={data.teams}
-        proposals={data.proposals}
-        activeTeamId={teamId}
-        onEditTask={() => {
-          setTab("card");
-          setMobilePane("chat");
-        }}
-        onDecision={(id, decision) => {
-          setData((current) => ({
-            ...current,
-            proposals: current.proposals.map((proposal) =>
-              proposal.id === id ? { ...proposal, status: decision } : proposal,
-            ),
-          }));
-          toast.success(
-            decision === "selected"
-              ? "Команда выбрана"
-              : decision === "rejected"
-                ? "Предложение отклонено"
-                : "Решение отменено",
-            {
-              description:
-                decision === "selected"
-                  ? "Можно продолжить просмотр и выбрать ещё одну команду."
-                  : "Отклик остаётся в списке.",
-            },
-          );
-        }}
-        onApply={(input) => {
-          const proposal = {
-            ...input,
-            id: crypto.randomUUID(),
-            taskId: task.id,
-            teamId,
-            status: "pending" as const,
-            milestoneConfirmed: false,
-          };
-          setData((current) => ({
-            ...current,
-            proposals: [...current.proposals, proposal],
-          }));
-          toast.success("Предложение отправлено", {
-            description: "Переключитесь в роль бизнеса, чтобы увидеть отклик.",
-          });
-        }}
-        onMilestone={(id) => {
-          setData((current) => ({
-            ...current,
-            proposals: current.proposals.map((proposal) =>
-              proposal.id === id && proposal.status === "selected"
-                ? { ...proposal, milestoneConfirmed: true }
-                : proposal,
-            ),
-          }));
-          toast.success("Этап подтверждён: +10 баллов команде", {
-            description: "Повторное подтверждение не начисляет баллы снова.",
-          });
-        }}
-      />
-    </div>
+    <TaskInspector
+      role={role}
+      task={task}
+      teams={data.teams}
+      proposals={data.proposals}
+      activeTeamId={teamId}
+      onEditTask={() => {
+        setTab("card");
+        setMobilePane("chat");
+      }}
+      onDecision={(id, decision) => {
+        setData((current) => ({
+          ...current,
+          proposals: current.proposals.map((proposal) =>
+            proposal.id === id ? { ...proposal, status: decision } : proposal,
+          ),
+        }));
+        toast.success(
+          decision === "selected"
+            ? "Команда выбрана"
+            : decision === "rejected"
+              ? "Предложение отклонено"
+              : "Решение отменено",
+          {
+            description:
+              decision === "selected"
+                ? "Можно продолжить просмотр и выбрать ещё одну команду."
+                : "Отклик остаётся в списке.",
+          },
+        );
+      }}
+      onApply={(input) => {
+        const proposal = {
+          ...input,
+          id: crypto.randomUUID(),
+          taskId: task.id,
+          teamId,
+          status: "pending" as const,
+          milestoneConfirmed: false,
+        };
+        setData((current) => ({
+          ...current,
+          proposals: [...current.proposals, proposal],
+        }));
+        toast.success("Предложение отправлено", {
+          description: "Переключитесь в роль бизнеса, чтобы увидеть отклик.",
+        });
+      }}
+      onMilestone={(id) => {
+        setData((current) => ({
+          ...current,
+          proposals: current.proposals.map((proposal) =>
+            proposal.id === id && proposal.status === "selected"
+              ? { ...proposal, milestoneConfirmed: true }
+              : proposal,
+          ),
+        }));
+        toast.success("Этап подтверждён: +10 баллов команде", {
+          description: "Повторное подтверждение не начисляет баллы снова.",
+        });
+      }}
+    />
   );
 
   return (
     <div
       key={resetGeneration}
-      className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[#fbfbfd]"
+      className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background"
     >
-      <header className="flex h-[68px] shrink-0 items-center justify-between gap-4 px-5 lg:px-7">
+      <header className="flex h-16 shrink-0 items-center justify-between gap-4 border-b px-5 lg:px-7">
         <div className="flex min-w-0 items-center gap-4">
           <button
             type="button"
             onClick={() => setShowDemo(true)}
-            aria-label="О Sana"
+            aria-label="О AI-Sana"
             className="flex items-center gap-1.5 rounded focus-visible:outline-2 focus-visible:outline-primary"
           >
-            <Asterisk className="size-8 text-primary" strokeWidth={1.8} />
-            <span className="text-[28px] leading-none font-semibold tracking-[-1.4px]">
-              sana
+            <span className="text-xl leading-none font-semibold tracking-tight">
+              AI-Sana
             </span>
           </button>
           <span className="hidden h-5 w-px bg-border sm:block" />
           <span className="hidden items-center gap-3 text-[11px] text-muted-foreground xl:flex">
-            <ChevronRight className="size-3" />
             Рабочее пространство
           </span>
         </div>
         <div
-          className="flex items-center rounded-full bg-[#f0eff4] p-1"
+          className="flex items-center rounded-full bg-muted p-1"
           aria-label="Роль в демо"
         >
           {(
             [
-              ["business", "Бизнес", BriefcaseBusiness],
-              ["student", "Студент", GraduationCap],
+              ["business", "Бизнес"],
+              ["student", "Студент"],
             ] as const
-          ).map(([value, label, Icon]) => (
+          ).map(([value, label]) => (
             <button
               type="button"
               key={value}
@@ -467,47 +397,40 @@ export default function WorkspacePage() {
               className={cn(
                 "flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[11px] transition-all sm:px-5",
                 role === value
-                  ? "bg-white font-medium text-primary shadow-[0_1px_4px_#31255012] ring-1 ring-black/[.025]"
+                  ? "bg-card font-medium text-primary shadow-sm ring-1 ring-primary/5"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
-              <Icon className="hidden size-3.5 sm:block" />
               {label}
             </button>
           ))}
         </div>
         <div className="flex items-center gap-3">
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             onClick={() => setShowDemo(true)}
             className="h-7 gap-1.5 bg-transparent px-2 text-[10px]"
           >
-            <span className="size-1.5 rounded-full bg-amber-400" />
             Демо
-            <CircleHelp className="size-3 text-muted-foreground" />
           </Button>
           <div
             title={role === "business" ? "Представитель бизнеса" : team.name}
-            className="hidden size-8 items-center justify-center rounded-full bg-[#e9e4f8] text-[10px] font-medium text-primary sm:flex"
+            className="hidden size-8 items-center justify-center rounded-full bg-secondary text-[10px] font-medium text-primary sm:flex"
           >
             {role === "business" ? "Б" : team.initials}
           </div>
         </div>
       </header>
-      {compact && (
+      {role === "business" && compact && (
         <div className="flex shrink-0 gap-1 px-3 pb-2">
           {(
             [
-              ["tasks", "Задачи", List],
-              ["chat", "Ассистент", MessageSquare],
-              [
-                "details",
-                role === "business" ? "Отклики" : "Предложение",
-                Users,
-              ],
+              ["tasks", "Задачи"],
+              ["chat", "Ассистент"],
+              ["details", "Отклики"],
             ] as const
-          ).map(([value, label, Icon]) => (
+          ).map(([value, label]) => (
             <Button
               key={value}
               variant={mobilePane === value ? "secondary" : "ghost"}
@@ -515,20 +438,53 @@ export default function WorkspacePage() {
               onClick={() => setMobilePane(value)}
               className="flex-1 text-[11px]"
             >
-              <Icon className="size-3.5" />
               {label}
             </Button>
           ))}
         </div>
       )}
-      <div className="min-h-0 flex-1 px-3 pb-3">
-        {compact ? (
+      <div className={cn("min-h-0 flex-1", role === "business" && "p-3")}>
+        {role === "student" ? (
+          <StudentCatalog
+            tasks={data.tasks}
+            proposals={data.proposals}
+            activeTeamId={teamId}
+            selectedTaskId={canonicalTask.id}
+            onSelectTask={selectTask}
+            teamControl={
+              <TeamPicker
+                teams={data.teams}
+                activeTeamId={teamId}
+                onTeamChange={setTeamId}
+                points={points}
+                onTeamSave={(next) => {
+                  setData((current) => ({
+                    ...current,
+                    teams: current.teams.some((item) => item.id === next.id)
+                      ? current.teams.map((item) =>
+                          item.id === next.id ? next : item,
+                        )
+                      : [...current.teams, next],
+                  }));
+                  setTeamId(next.id);
+                  toast.success("Профиль команды сохранён");
+                }}
+              />
+            }
+          >
+            {inspector}
+          </StudentCatalog>
+        ) : compact ? (
           <div className="h-full">
-            {mobilePane === "tasks"
-              ? navigation
-              : mobilePane === "chat"
-                ? center
-                : inspector}
+            {mobilePane === "tasks" ? (
+              navigation
+            ) : mobilePane === "chat" ? (
+              center
+            ) : (
+              <div className="workspace-panel bg-workspace-surface">
+                {inspector}
+              </div>
+            )}
           </div>
         ) : (
           <ResizablePanelGroup orientation="horizontal" className="gap-0">
@@ -555,7 +511,9 @@ export default function WorkspacePage() {
               minSize="310px"
               maxSize="42%"
             >
-              {inspector}
+              <div className="workspace-panel bg-workspace-surface">
+                {inspector}
+              </div>
             </ResizablePanel>
           </ResizablePanelGroup>
         )}
@@ -581,7 +539,7 @@ export default function WorkspacePage() {
         <DialogContent className="p-6 sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="text-lg font-semibold">
-              Рабочее пространство в демо-режиме
+              AI-Sana · демо
             </DialogTitle>
             <DialogDescription className="pt-2 leading-relaxed">
               Это интерактивный frontend с вымышленными задачами и командами.
@@ -607,7 +565,6 @@ export default function WorkspacePage() {
             страницы. Отправки во внешние сервисы нет.
           </p>
           <Button variant="outline" onClick={resetDemo} className="mt-2">
-            <RotateCcw className="size-3.5" />
             Начать демо заново
           </Button>
         </DialogContent>
