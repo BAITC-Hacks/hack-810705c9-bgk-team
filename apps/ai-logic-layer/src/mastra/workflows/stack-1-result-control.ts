@@ -1,3 +1,9 @@
+/**
+ * Historical PR #12 prototype; deliberately NOT registered in Mastra.
+ * Its suspend/resume lifecycle and memory calls are incompatible with ADR-002/003.
+ * Task Match uses analyze-text / phrase-question; BFF owns every business transition.
+ * Kept only as a source reference for the original interview methodology.
+ */
 import { createWorkflow } from '@mastra/core/workflows';
 
 import {

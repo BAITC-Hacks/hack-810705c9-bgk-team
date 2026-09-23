@@ -32,6 +32,7 @@
       "name": "presentation-layer",
       "version": "0.1.0",
       "dependencies": {
+        "@aws-sdk/client-s3": "3.1138.0",
         "@base-ui/react": "^1.8.0",
         "@gravity-ui/icons": "^2.22.0",
         "@hallelx/youtube-transcript": "^0.2.0",

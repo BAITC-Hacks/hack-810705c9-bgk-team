@@ -30,6 +30,10 @@ export type Task = {
   createdAt: string;
   /** Рейтинг агента-оценщика (task-evaluator-agent); публикация не блокируется. */
   rating?: TaskRating;
+  score?: number;
+  canEdit?: boolean;
+  publishedAt?: string | null;
+  version?: number;
 };
 
 export type Team = {
@@ -43,6 +47,12 @@ export type Team = {
   color: string;
 };
 
+export type MilestoneSubmission = {
+  title: string;
+  resultUrl: string;
+  comment: string;
+};
+
 export type Proposal = {
   id: string;
   taskId: string;
@@ -53,6 +63,8 @@ export type Proposal = {
   prototypeUrl: string;
   status: "pending" | "selected" | "rejected";
   milestoneConfirmed: boolean;
+  points?: number;
+  milestone?: MilestoneSubmission;
 };
 
 export type Message = {
@@ -153,6 +165,7 @@ function isConfirmed(task: Task, field: TaskField): boolean {
 }
 
 export function calculateScore(task: Task): number {
+  if (typeof task.score === "number") return task.score;
   return TASK_FIELDS.reduce(
     (score, field) => score + (isConfirmed(task, field.key) ? field.weight : 0),
     0,
@@ -197,10 +210,10 @@ export function readiness(score: number): {
   label: string;
   tone: "muted" | "amber" | "green" | "violet";
 } {
-  if (score < 40) return { label: "Нужно уточнить", tone: "muted" };
-  if (score < 70) return { label: "Есть основа", tone: "amber" };
-  if (score < 90) return { label: "Можно начинать", tone: "green" };
-  return { label: "Готово к работе", tone: "violet" };
+  if (score < 40) return { label: "Требует уточнения", tone: "muted" };
+  if (score < 70) return { label: "Рабочая", tone: "amber" };
+  if (score < 90) return { label: "Готовая", tone: "green" };
+  return { label: "Приоритетная", tone: "violet" };
 }
 
 export function createTask(description: string): Task {
@@ -236,10 +249,38 @@ export function createTask(description: string): Task {
 export function suggestQuestions(
   task: Task,
 ): { field: TaskField; question: string }[] {
-  return TASK_FIELDS.filter((field) => !isConfirmed(task, field.key))
+  // Filled answers need human confirmation, not the same question again.
+  return TASK_FIELDS.filter((field) => !task.fields[field.key].trim())
     .sort((first, second) => second.weight - first.weight)
     .slice(0, 3)
     .map((field) => ({ field: field.key, question: field.question }));
+}
+
+export function submitMilestone(
+  proposal: Proposal,
+  submission: MilestoneSubmission,
+): Proposal {
+  if (proposal.status !== "selected" || proposal.milestoneConfirmed) return proposal;
+  const milestone = {
+    title: submission.title.trim(),
+    resultUrl: submission.resultUrl.trim(),
+    comment: submission.comment.trim(),
+  };
+  if (!milestone.title || !milestone.comment) return proposal;
+  try {
+    const url = new URL(milestone.resultUrl);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return proposal;
+  } catch {
+    return proposal;
+  }
+  return { ...proposal, milestone };
+}
+
+export function confirmMilestone(proposal: Proposal): Proposal {
+  if (proposal.status !== "selected" || !proposal.milestone || proposal.milestoneConfirmed) {
+    return proposal;
+  }
+  return { ...proposal, milestoneConfirmed: true };
 }
 
 export function getTaskSummary(task: Task): string {

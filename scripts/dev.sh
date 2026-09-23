@@ -130,6 +130,11 @@ ensure_env_file "apps/workers"
 log "Database schema"
 sync_schema "apps/presentation-layer"
 
+if [[ "${SEED_DEMO_DATA:-1}" == "1" ]]; then
+  log "Seeding demo workspace (existing records are preserved)"
+  (cd apps/presentation-layer && bun run db:seed)
+fi
+
 log "Starting dev servers (Next :3000, Mastra :4111, workers)"
 echo "Ctrl+C stops the dev servers; the Docker infra is stopped right after."
 echo "Leave infra running after exit: KEEP_INFRA=1 ./scripts/dev.sh"

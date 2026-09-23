@@ -8,6 +8,27 @@
       "when": 1790150534448,
       "tag": "20260923080214_pretty_nick_fury",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790160202121,
+      "tag": "20260923104322_task_match_workspace",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790162668273,
+      "tag": "20260923112428_onboarding_business_logo",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790163357420,
+      "tag": "20260923113557_task_match_integration",
+      "breakpoints": true
     }
   ]
 }

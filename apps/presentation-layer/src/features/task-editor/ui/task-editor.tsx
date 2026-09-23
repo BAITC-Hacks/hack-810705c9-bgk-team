@@ -22,12 +22,13 @@ import {
   TooltipTrigger,
 } from "@/shared/components/ui/tooltip";
 import { cn } from "@/shared/lib/utils";
+import { useAsyncAction } from "@/shared/hooks/use-async-action";
 
 type TaskEditorProps = {
   task: Task;
   savedTask?: Task;
   draftCache?: Map<string, TaskEditorDraft>;
-  onSave: (task: Task) => void;
+  onSave: (task: Task) => void | Promise<void>;
   onCancel?: () => void;
 };
 
@@ -38,6 +39,16 @@ export type TaskEditorDraft = {
 };
 
 type EditorErrors = { title?: string; need?: string; confirmation?: string };
+type ScoreLine = { node: string; points: number; max: number; reason: string };
+
+const NODE_LABELS: Record<string, string> = {
+  "context.current": "Текущий процесс", "context.size": "Масштаб проблемы", "context.change": "Что изменится",
+  "data.what": "Данные и материалы", "data.volume": "Объём данных", "data.sample": "Пример данных",
+  "result.artifact": "Результат", "result.acceptance": "Формат сдачи", "criteria.items": "Критерии приёмки",
+  "constraints.deadline": "Срок", "constraints.stack": "Стек и роли", "constraints.other": "Другие ограничения",
+  "users.role": "Пользователи", "users.scale": "Количество пользователей",
+  "link.contact": "Контакт", "link.cadence": "Консультации", "link.response": "Ответ на отклик",
+};
 
 function nonemptyFields(task: Task): TaskField[] {
   return TASK_FIELDS.filter((field) => task.fields[field.key].trim()).map(
@@ -84,6 +95,17 @@ function sameText(first: Task, second: Task): boolean {
   );
 }
 
+export function hasTaskEditorChanges(
+  editor: TaskEditorDraft | undefined,
+  savedTask: Task,
+): boolean {
+  return Boolean(
+    editor &&
+      (!sameText(editor.draft, savedTask) ||
+        (editor.verified && !isFullyConfirmed(savedTask))),
+  );
+}
+
 export function TaskEditor({
   task,
   savedTask = task,
@@ -91,6 +113,15 @@ export function TaskEditor({
   onSave,
   onCancel,
 }: TaskEditorProps) {
+  const [serverScoreLines, setServerScoreLines] = useState<ScoreLine[] | null>(null);
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/tasks/${encodeURIComponent(savedTask.id)}/score`)
+      .then(async response => response.ok ? response.json() : null)
+      .then(result => { if (active) setServerScoreLines(result?.lines ?? null); })
+      .catch(() => { if (active) setServerScoreLines(null); });
+    return () => { active = false; };
+  }, [savedTask.id, savedTask.score, savedTask.version]);
   const id = useId();
   const titleRef = useRef<HTMLInputElement>(null);
   const needRef = useRef<HTMLTextAreaElement>(null);
@@ -104,6 +135,7 @@ export function TaskEditor({
       },
   );
   const [errors, setErrors] = useState<EditorErrors>({});
+  const { pending, error, run } = useAsyncAction();
 
   useEffect(() => {
     draftCache?.set(editor.source.id, editor);
@@ -165,7 +197,7 @@ export function TaskEditor({
     }));
   }
 
-  function save(publish: boolean) {
+  async function save(publish: boolean) {
     const nextErrors: EditorErrors = {};
     if (!draft.title.trim()) nextErrors.title = "Добавьте название задачи.";
     if (!draft.fields.need.trim() && !draft.fields.context.trim()) {
@@ -199,12 +231,12 @@ export function TaskEditor({
       ) as Record<TaskField, string>,
       status: publish ? "published" : draft.status,
     };
+    if (!await run(() => onSave(nextTask))) return;
     setEditor((current) => ({
       ...current,
       draft: nextTask,
       verified: isFullyConfirmed(nextTask),
     }));
-    onSave(nextTask);
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -219,6 +251,7 @@ export function TaskEditor({
       noValidate
       aria-label="Редактор карточки задачи"
     >
+      <fieldset disabled={pending} className="contents">
       <div className="space-y-7 px-5 py-5 sm:px-7">
         <div>
           <div className="flex items-center justify-between gap-3">
@@ -232,6 +265,9 @@ export function TaskEditor({
           <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
             Заполните то, что знаете. Пропуски не мешают публикации.
           </p>
+          <Button asChild variant="outline" size="sm" className="mt-3">
+            <a href={`/task-match?task=${encodeURIComponent(task.id)}`}>Подробные поля и критерии приёмки</a>
+          </Button>
         </div>
 
         <section
@@ -277,7 +313,7 @@ export function TaskEditor({
             <span className="text-muted-foreground">
               {savedReadiness.label}
             </span>
-            {changed ? (
+            {changed && savedTask.score === undefined ? (
               <span className="text-muted-foreground">
                 {isPublished && !verified ? "Предпросмотр" : "После сохранения"}
                 :{" "}
@@ -296,7 +332,14 @@ export function TaskEditor({
               />
             </summary>
             <div className="mt-4 space-y-3">
-              {breakdown.map((group, index) => (
+              {savedTask.score !== undefined ? (
+                serverScoreLines ? serverScoreLines.map((line) => (
+                  <div key={line.node} className="flex items-center justify-between gap-4 text-xs">
+                    <span className="text-foreground/80">{NODE_LABELS[line.node] ?? line.node}</span>
+                    <span className="shrink-0 tabular-nums text-muted-foreground">{line.points} / {line.max}</span>
+                  </div>
+                )) : <p className="text-xs text-muted-foreground">Расшифровка временно недоступна.</p>
+              ) : breakdown.map((group, index) => (
                 <div key={group.label}>
                   <div className="flex items-center justify-between gap-4 text-[13px]">
                     <span className="text-foreground/80">{group.label}</span>
@@ -359,7 +402,7 @@ export function TaskEditor({
               <p
                 id={`${id}-title-error`}
                 role="alert"
-                className="text-xs text-red-600"
+                className="text-xs text-destructive"
               >
                 {errors.title}
               </p>
@@ -452,7 +495,7 @@ export function TaskEditor({
                   <p
                     id={`${id}-need-error`}
                     role="alert"
-                    className="text-xs text-red-600"
+                    className="text-xs text-destructive"
                   >
                     {errors.need}
                   </p>
@@ -499,7 +542,7 @@ export function TaskEditor({
               <p
                 id={`${id}-confirmation-error`}
                 role="alert"
-                className="mt-2 text-xs text-red-600"
+                className="mt-2 text-xs text-destructive"
               >
                 {errors.confirmation}
               </p>
@@ -509,6 +552,8 @@ export function TaskEditor({
       </div>
 
       <footer className="sticky bottom-0 z-10 mt-auto flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border bg-card/95 px-5 py-4 backdrop-blur-sm sm:px-7">
+        {error && <p role="alert" className="w-full text-sm text-destructive">{error}</p>}
+        {pending && <p role="status" className="w-full text-sm text-muted-foreground">Сохраняем карточку…</p>}
         {onCancel ? (
           <Button
             type="button"
@@ -516,7 +561,7 @@ export function TaskEditor({
             onClick={onCancel}
             className="mr-auto h-10 text-[13px] font-semibold text-muted-foreground"
           >
-            Отмена
+            Закрыть
           </Button>
         ) : null}
         {isPublished ? (
@@ -545,6 +590,7 @@ export function TaskEditor({
           </>
         )}
       </footer>
+      </fieldset>
     </form>
   );
 }

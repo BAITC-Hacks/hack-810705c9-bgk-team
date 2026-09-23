@@ -97,7 +97,7 @@ export function StudentCatalog({
     .filter(
       ({ task, score }) =>
         (view === "all" || teamProposals.has(task.id)) &&
-        `${task.title} ${task.company} ${task.industry}`
+        `${task.title} ${task.company} ${task.industry} ${task.fields.need}`
           .toLocaleLowerCase("ru")
           .includes(normalizedQuery) &&
         (industry === "all" || task.industry === industry) &&
@@ -343,7 +343,7 @@ export function StudentCatalog({
                           {task.title}
                         </span>
                         <span className="mt-1.5 line-clamp-2 text-[13px] leading-relaxed text-muted-foreground sm:line-clamp-1">
-                          {task.description || task.fields.need}
+                          {task.fields.need.trim() || "Потребность нужно уточнить с бизнесом"}
                         </span>
                         {proposal && (
                           <span className="mt-2 block text-[13px] font-medium text-foreground/80">
@@ -361,7 +361,10 @@ export function StudentCatalog({
                             / 100
                           </span>
                         </span>
-                        <span className="mt-1.5 block max-w-24 text-xs leading-snug text-muted-foreground sm:ml-auto sm:max-w-none">
+                        <span className={cn(
+                          "mt-1.5 block max-w-24 text-xs leading-snug sm:ml-auto sm:max-w-none",
+                          score >= 90 ? "font-semibold text-foreground" : "text-muted-foreground",
+                        )}>
                           {state.label}
                         </span>
                       </span>
