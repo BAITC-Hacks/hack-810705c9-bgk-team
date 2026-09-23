@@ -8,7 +8,7 @@ export function OnboardingVideo() {
   const video = useRef<HTMLVideoElement>(null);
   const manuallyPaused = useRef(false);
   const [playing, setPlaying] = useState(false);
-  const [finished, setFinished] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     const element = video.current;
@@ -27,7 +27,7 @@ export function OnboardingVideo() {
       }
       if (!element.getAttribute("src"))
         element.src = "/ai_sana_onboarding_video.mp4";
-      if (!element.ended && !manuallyPaused.current)
+      if (!manuallyPaused.current)
         void element.play().catch(() => {});
     };
     syncPlayback();
@@ -46,18 +46,15 @@ export function OnboardingVideo() {
         className={styles.video}
         aria-hidden="true"
         muted
+        loop
         playsInline
         preload="none"
         disablePictureInPicture
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
-        onEnded={() => {
-          setPlaying(false);
-          setFinished(true);
-        }}
-        onError={() => setFinished(true)}
+        onError={() => setFailed(true)}
       />
-      {!finished && (
+      {!failed && (
         <button
           type="button"
           className={styles.videoControl}
