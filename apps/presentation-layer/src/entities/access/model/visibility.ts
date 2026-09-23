@@ -11,13 +11,38 @@ import type {
   TaskAccess,
 } from "./types";
 
-/** Поле карточки, которое видит исполнитель. */
-export type ExecutorField<F extends AccessField> = Omit<
-  F,
-  "source" | "sourceQuote" | "sourceTurnId"
->;
+/**
+ * Явный список полей задачи, видимых исполнителю (раздел 10 платформы).
+ * Всё, чего здесь нет (черновик, внутренние заметки, будущие колонки), не
+ * попадает в вид исполнителя, пока его сюда не добавят осознанно.
+ */
+export const EXECUTOR_TASK_KEYS = [
+  "id",
+  "businessId",
+  "company",
+  "title",
+  "topic",
+  "status",
+  "engagement",
+  "compensationNote",
+  "neededRoles",
+  "neededSkills",
+  "score",
+  "level",
+  "publishedAt",
+  "criteriaVersion",
+] as const;
 
-export type ExecutorTaskView<T extends AccessTask> = Omit<T, "fields" | "draftText"> & {
+/** Поля карточки для исполнителя: без источника, цитаты и реплики бизнеса (FR-2.5). */
+export const EXECUTOR_FIELD_KEYS = ["node", "value", "state", "notApplicable", "confirmedAt"] as const;
+
+type ExecutorTaskKey = (typeof EXECUTOR_TASK_KEYS)[number];
+type ExecutorFieldKey = (typeof EXECUTOR_FIELD_KEYS)[number];
+
+/** Поле карточки, которое видит исполнитель. */
+export type ExecutorField<F extends AccessField> = Pick<F, Extract<keyof F, ExecutorFieldKey>>;
+
+export type ExecutorTaskView<T extends AccessTask> = Pick<T, Extract<keyof T, ExecutorTaskKey>> & {
   fields: ExecutorField<T["fields"][number]>[];
 };
 
@@ -26,21 +51,26 @@ export type ExecutorTaskView<T extends AccessTask> = Omit<T, "fields" | "draftTe
  * переключателя «Вид исполнителя» (FR-2.8):
  * - только `confirmed` поля (FR-4.1), `suggested` и `empty` скрыты;
  * - «не применимо» остаётся с пояснением в `value` (FR-1.11);
- * - черновик и реплики-источники бизнеса скрыты.
+ * - в ответ попадают только ключи из EXECUTOR_TASK_KEYS / EXECUTOR_FIELD_KEYS.
  */
 export function toExecutorView<T extends AccessTask>(task: T): ExecutorTaskView<T> {
   return {
-    ...omit(task, ["fields", "draftText"]),
+    ...pick(task, EXECUTOR_TASK_KEYS),
     fields: (task.fields as T["fields"][number][])
       .filter((field) => field.state === "confirmed")
-      .map((field) => omit(field, ["source", "sourceQuote", "sourceTurnId"])),
+      .map((field) => pick(field, EXECUTOR_FIELD_KEYS)),
   };
 }
 
-function omit<T extends object, K extends keyof T>(value: T, keys: readonly K[]): Omit<T, K> {
-  return Object.fromEntries(
-    Object.entries(value).filter(([key]) => !keys.includes(key as K)),
-  ) as Omit<T, K>;
+function pick<T extends object, K extends string>(
+  value: T,
+  keys: readonly K[],
+): Pick<T, Extract<keyof T, K>> {
+  const result: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (Object.hasOwn(value, key)) result[key] = (value as Record<string, unknown>)[key];
+  }
+  return result as Pick<T, Extract<keyof T, K>>;
 }
 
 /**

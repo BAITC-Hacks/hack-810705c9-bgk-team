@@ -1,4 +1,6 @@
 export {
+  EXECUTOR_FIELD_KEYS,
+  EXECUTOR_TASK_KEYS,
   canViewProposal,
   taskAccess,
   toExecutorView,

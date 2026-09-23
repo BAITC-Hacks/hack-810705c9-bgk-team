@@ -66,6 +66,19 @@ describe("вид исполнителя (FR-2.8, FR-4.1, FR-1.11)", () => {
     assert.equal(na?.value, "Данных нет, выгрузку соберёт аналитик");
   });
 
+  it("пропускает только разрешённые ключи задачи и поля", () => {
+    const leaky = {
+      ...tasks[1],
+      contact: "it@logistics.example",
+      internalNote: "не показывать командам",
+      fields: [{ ...fields[0], internalNote: "черновая пометка", source: "grill" }],
+    };
+    const safe = toExecutorView(leaky);
+    assert.equal("contact" in safe, false);
+    assert.equal("internalNote" in safe, false);
+    assert.deepEqual(Object.keys(safe.fields[0]).sort(), ["node", "state", "value"]);
+  });
+
   it("скрывает черновик и реплики-источники, остальное сохраняет", () => {
     assert.equal("draftText" in view, false);
     assert.equal("sourceQuote" in view.fields[0], false);
