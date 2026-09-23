@@ -17,6 +17,7 @@ Build a working hackathon demo within five hours. Implement the requested user f
 - Commands: `./start.sh` for local dev; `./doctor.sh` for prerequisites; `bun run check-types` for types. App scripts live in their package.json.
 
 ## Working context
+- Product requirements and acceptance scenarios: [MVP «Мэтч задач» specification](docs/TASK_MATCH_MVP_SPEC.md). This is an unchanged source document; its SQLite/pnpm and single-app layout in section 8 do not replace the canonical stack above.
 - Read the files relevant to the task, not the entire repository. Search `apps/` and `packages/` first.
 - For task-specific guidance, use [hackathon-guide](.agents/skills/hackathon-guide/SKILL.md) ([Claude Code copy](.claude/skills/hackathon-guide/SKILL.md)). Its table maps tasks to a reference and the owning project module. Routine edits do not require library reading.
 - The [full routing catalog](skills/cc-polymath/ROUTING.md) explains when to use all 26 entry points in the [cc-polymath library](skills/cc-polymath/skills/). Read only the selected skill and relevant references, resolving links relative to the file being read. Apply the [project adaptation](skills/cc-polymath/PROJECT.md) when translating upstream examples. Vendor guidance is advisory; current code, accepted ADRs and the user's task determine project choices.

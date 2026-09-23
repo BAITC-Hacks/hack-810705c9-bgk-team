@@ -5,6 +5,9 @@
 **После клонирования: `./start.sh`.** Инструкция команды: [QUICKSTART.md](QUICKSTART.md).
 Скиллы и правила агентов уже в Git; повторно устанавливать их не нужно.
 Основной стек и границы модулей: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Техническое задание MVP «Мэтч задач»: [docs/TASK_MATCH_MVP_SPEC.md](docs/TASK_MATCH_MVP_SPEC.md).
+ТЗ сохранено в исходном виде; упоминания SQLite/pnpm и структуры кода в разделе 8
+отличаются от принятого стека — для реализации используем `docs/ARCHITECTURE.md` и `AGENTS.md`.
 
 Монорепозиторий на базе **Turborepo** и **Bun**, содержащий три приложения:
 
