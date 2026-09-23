@@ -622,7 +622,8 @@ function BusinessInspector({
   );
 }
 
-function StudentInspector({
+function TaskDetailsInspector({
+  role,
   task,
   teams,
   proposals,
@@ -685,8 +686,9 @@ function StudentInspector({
               {readinessState.label}
             </p>
             <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-              На опубликованную задачу можно откликнуться при любой готовности и
-              уточнить детали вместе с бизнесом.
+              {role === "student"
+                ? "На опубликованную задачу можно откликнуться при любой готовности и уточнить детали вместе с бизнесом."
+                : "Опубликованная карточка задачи. Здесь доступны подтверждённые сведения."}
             </p>
           </div>
         </section>
@@ -760,7 +762,7 @@ function StudentInspector({
           </dl>
         </details>
 
-        <section className="border-t pt-5">
+        {role === "student" && <section className="border-t pt-5">
           <h3 className="mb-3 text-sm font-semibold">
             {proposal ? "Ваш отклик" : "Ваше решение"}
           </h3>
@@ -833,7 +835,7 @@ function StudentInspector({
               Выберите свою команду, чтобы предложить решение.
             </p>
           )}
-        </section>
+        </section>}
       </div>
     </>
   );
@@ -845,10 +847,10 @@ export function TaskInspector(props: TaskInspectorProps) {
       className="flex h-full min-h-0 min-w-0 flex-col bg-card"
       aria-labelledby="inspector-title"
     >
-      {props.role === "business" ? (
+      {props.role === "business" && props.task.canEdit === true ? (
         <BusinessInspector key={props.task.id} {...props} />
       ) : (
-        <StudentInspector
+        <TaskDetailsInspector
           key={`${props.task.id}-${props.activeTeamId}`}
           {...props}
         />
