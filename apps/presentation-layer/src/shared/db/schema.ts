@@ -67,6 +67,26 @@ export const scoreEvents = pgTable('score_events', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const aiLogs = pgTable('ai_logs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  taskId: uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  turnId: uuid('turn_id').references(() => grillTurns.id, { onDelete: 'set null' }),
+  kind: text('kind').notNull(),
+  agent: text('agent').notNull(),
+  model: text('model'),
+  prompt: text('prompt'),
+  input: jsonb('input').$type<unknown>().notNull(),
+  rawOutput: text('raw_output'),
+  parseOk: boolean('parse_ok').notNull().default(false),
+  retryCount: integer('retry_count').notNull().default(0),
+  dropped: jsonb('dropped').$type<unknown[]>().notNull().default([]),
+  latencyMs: integer('latency_ms'),
+  error: text('error'),
+  fallbackUsed: boolean('fallback_used').notNull().default(false),
+  fallbackReason: text('fallback_reason'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const proposals = pgTable('proposals', {
   id: uuid('id').defaultRandom().primaryKey(),
   taskId: uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
