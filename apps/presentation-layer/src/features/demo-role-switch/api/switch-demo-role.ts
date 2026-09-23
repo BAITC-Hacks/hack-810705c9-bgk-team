@@ -2,22 +2,25 @@
 
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
+import { z } from "zod";
 
 import {
   ACTOR_COOKIE,
   ROLE_COOKIE,
   VIEW_COOKIE,
+  DEMO_ROLES,
+  DEMO_VIEWS,
   demoActorId,
-  isDemoView,
   toDemoActor,
-  type DemoView,
 } from "@/shared/lib/demo-actor";
 
-export type SwitchDemoRoleInput = {
-  role: string;
-  actorId: string;
-  view?: string;
-};
+const inputSchema = z.object({
+  role: z.enum(DEMO_ROLES),
+  actorId: z.string().min(1).max(64),
+  view: z.enum(DEMO_VIEWS).optional(),
+});
+
+export type SwitchDemoRoleInput = z.input<typeof inputSchema>;
 
 export type SwitchDemoRoleResult = { ok: true } | { ok: false; error: string };
 
@@ -30,18 +33,19 @@ const YEAR = 60 * 60 * 24 * 365;
  * влияет на доступ, и клиент может читать его без запроса к серверу.
  * Подделать cookie всё равно можно — это демо без аутентификации.
  */
-export async function switchDemoRole(input: SwitchDemoRoleInput): Promise<SwitchDemoRoleResult> {
+export async function switchDemoRole(raw: unknown): Promise<SwitchDemoRoleResult> {
+  // Server action — публичный POST-эндпоинт: вход проверяется, а не доверяется типам.
+  const parsed = inputSchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, error: "Некорректные параметры демо-роли" };
+  const input = parsed.data;
   const actor = toDemoActor(input.role, input.actorId);
-  if (!actor) return { ok: false, error: "Неизвестная роль или участник демо" };
-  if (input.view !== undefined && !isDemoView(input.view)) {
-    return { ok: false, error: "Неизвестный вид: ожидается deck или grid" };
-  }
+  if (!actor) return { ok: false, error: "Неизвестный участник демо для этой роли" };
 
   const jar = await cookies();
   const base = { path: "/", sameSite: "lax", maxAge: YEAR } as const;
   jar.set(ROLE_COOKIE, actor.role, { ...base, httpOnly: true });
   jar.set(ACTOR_COOKIE, demoActorId(actor), { ...base, httpOnly: true });
-  if (input.view) jar.set(VIEW_COOKIE, input.view satisfies DemoView, base);
+  if (input.view) jar.set(VIEW_COOKIE, input.view, base);
 
   revalidatePath("/", "layout");
   return { ok: true };

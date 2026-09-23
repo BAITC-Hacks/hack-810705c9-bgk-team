@@ -32,8 +32,12 @@ export function DemoRoleSwitch({ actor, view }: Props) {
   function submit(input: SwitchDemoRoleInput) {
     setError(null);
     startTransition(async () => {
-      const result = await switchDemoRole(input);
-      if (!result.ok) setError(result.error);
+      try {
+        const result = await switchDemoRole(input);
+        if (!result.ok) setError(result.error);
+      } catch {
+        setError("Не удалось переключить роль");
+      }
     });
   }
 
