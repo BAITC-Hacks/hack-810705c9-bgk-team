@@ -8,6 +8,13 @@
       "when": 1790150534448,
       "tag": "20260923080214_pretty_nick_fury",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790158246990,
+      "tag": "20260923101046_adr007_proposals_stages",
+      "breakpoints": true
     }
   ]
 }
