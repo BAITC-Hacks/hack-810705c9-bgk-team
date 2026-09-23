@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowUpRight, Asterisk } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import {
   Dialog,
@@ -25,16 +24,12 @@ export function NewTaskDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="p-6 sm:max-w-lg">
-        <div className="mb-1 flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-          <Asterisk className="size-6" />
-        </div>
         <DialogHeader>
           <DialogTitle className="text-xl font-semibold">
-            С чего начнём?
+            Новая задача
           </DialogTitle>
           <DialogDescription className="leading-relaxed">
-            Расскажите о проблеме своими словами. Детали соберём вместе —
-            идеальное описание пока не нужно.
+            Опишите проблему. Ассистент поможет уточнить детали.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -70,7 +65,6 @@ export function NewTaskDialog({
               className="h-9"
             >
               Создать черновик
-              <ArrowUpRight className="size-4" />
             </Button>
           </div>
         </form>

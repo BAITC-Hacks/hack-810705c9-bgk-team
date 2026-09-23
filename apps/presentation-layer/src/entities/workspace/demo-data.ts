@@ -258,7 +258,7 @@ const DEMO_DATA: WorkspaceData = {
       skills: ["Python", "Аналитика", "Прогнозирование"],
       interests: ["Ритейл", "Агро"],
       members: 3,
-      color: "#e9e1ff",
+      color: "#e7e7e7",
     },
     {
       id: "team-tochka",
@@ -268,7 +268,7 @@ const DEMO_DATA: WorkspaceData = {
       skills: ["UX-исследования", "Figma", "React"],
       interests: ["Ритейл", "Сервисы"],
       members: 4,
-      color: "#fce6d6",
+      color: "#ededed",
     },
     {
       id: "team-data",
@@ -278,7 +278,7 @@ const DEMO_DATA: WorkspaceData = {
       skills: ["SQL", "Python", "Визуализация"],
       interests: ["Ритейл", "Логистика", "Производство"],
       members: 3,
-      color: "#daf0e5",
+      color: "#e1e1e1",
     },
     {
       id: "team-smena",
@@ -288,7 +288,7 @@ const DEMO_DATA: WorkspaceData = {
       skills: ["UX/UI", "React", "Тестирование"],
       interests: ["Здоровье", "Образование"],
       members: 4,
-      color: "#dceafa",
+      color: "#e9e9e9",
     },
     {
       id: "team-sever",
@@ -297,8 +297,8 @@ const DEMO_DATA: WorkspaceData = {
       tagline: "Строим маршруты и проверяем оптимизационные гипотезы",
       skills: ["Алгоритмы", "Карты", "TypeScript"],
       interests: ["Логистика", "Агро"],
-      members: 2,
-      color: "#f5edcb",
+      members: 3,
+      color: "#e5e5e5",
     },
     {
       id: "team-sreda",
@@ -308,7 +308,7 @@ const DEMO_DATA: WorkspaceData = {
       skills: ["Интервью", "Прототипирование", "Figma"],
       interests: ["Образование", "Культура", "Сервисы"],
       members: 3,
-      color: "#f4e0ed",
+      color: "#efefef",
     },
   ],
   proposals: [
