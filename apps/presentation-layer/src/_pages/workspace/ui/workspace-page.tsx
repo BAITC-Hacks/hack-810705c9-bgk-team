@@ -33,6 +33,7 @@ import {
   workspaceIdentity,
   readiness,
   TASK_FIELDS,
+  type ChatAttachment,
   type Message,
   type Role,
   type Task,
@@ -480,7 +481,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
       });
   }
 
-  async function sendMessage(text: string, field?: TaskField, skill?: ChatSkillId) {
+  async function sendMessage(text: string, field?: TaskField, skill?: ChatSkillId, attachments?: ChatAttachment[]) {
     let response = "";
     if (skill) {
       response = runChatSkill(task, data.proposals, data.teams, skill, text);
@@ -510,8 +511,8 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
     } else {
       const reply = await workspaceApi.chat(task.id, [
         { role: "user", content: task.description },
-        ...messages.map(({ role, content }) => ({ role, content })),
-        { role: "user", content: text },
+        ...messages.map(({ role, content, attachments }) => ({ role, content, attachments })),
+        { role: "user", content: text, attachments },
       ]);
       response = reply.text;
     }
@@ -525,6 +526,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
           content: skill
             ? `@${CHAT_SKILLS.find((item) => item.id === skill)?.label}${text ? `\n${text}` : ""}`
             : text,
+          ...(attachments?.length ? { attachments } : {}),
         },
         { id: crypto.randomUUID(), role: "assistant", content: response },
       ],
@@ -652,7 +654,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
         onSend={sendMessage}
         onEdit={openCard}
         onShowProposals={showProposals}
-        documents={taskDocuments.documents.map(({ id, file }) => ({ id, name: file.name }))}
+        onAddDocuments={taskDocuments.addDocuments}
         onShowDocuments={openDocuments}
         onShowShortcuts={() => setShortcutsOpen(true)}
       />

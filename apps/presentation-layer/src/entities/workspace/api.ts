@@ -1,5 +1,5 @@
 import type { MilestoneSubmission, Proposal, Task, Team } from "./model";
-import { prepareChatMessages, type ChatMessage } from "./chat-contracts";
+import { prepareChatMessages, type ChatAttachment, type ChatMessage } from "./chat-contracts";
 import type { OnboardingInput, WorkspaceSession, WorkspaceSnapshot } from "./contracts";
 export type { WorkspaceSession, WorkspaceSnapshot } from "./contracts";
 export { requestError } from "@/shared/lib/request-error";
@@ -9,7 +9,7 @@ async function request<T>(path: string, method = "GET", body?: unknown): Promise
     method,
     cache: "no-store",
     credentials: "same-origin",
-    ...(body === undefined ? {} : {
+    ...(body === undefined ? {} : body instanceof FormData ? { body } : {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
@@ -29,6 +29,11 @@ const key = encodeURIComponent;
 export const workspaceApi = {
   chat: (taskId: string, messages: ChatMessage[]) =>
     request<{ text: string }>(`/tasks/${key(taskId)}/chat`, "POST", { messages: prepareChatMessages(messages) }),
+  extractDocument: (taskId: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<Required<ChatAttachment>>(`/tasks/${key(taskId)}/documents/extract`, "POST", form);
+  },
   load: () => request<WorkspaceSnapshot>("/workspace"),
   getSession: () => request<WorkspaceSession>("/session"),
   teams: () => request<Team[]>("/teams"),

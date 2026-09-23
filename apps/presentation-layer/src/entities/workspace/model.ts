@@ -1,3 +1,4 @@
+import type { ChatAttachment } from "./chat-contracts";
 export type Role = "business" | "student";
 
 export type TaskField =
@@ -62,6 +63,7 @@ export type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  attachments?: ChatAttachment[];
 };
 
 export type WorkspaceData = {
