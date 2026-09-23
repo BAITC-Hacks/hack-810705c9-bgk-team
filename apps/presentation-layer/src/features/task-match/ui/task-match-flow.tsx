@@ -1,6 +1,7 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
-import type { DemoActor } from "@/shared/lib/demo-actor";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { demoActorId, type DemoActor } from "@/shared/lib/demo-actor";
 import { GRILL_NODES } from "@/entities/grill/model";
 import { fitPercent } from '@/entities/team';
 import { LEVEL_LABELS, levelOf } from "@/entities/task/model/level";
@@ -40,9 +41,12 @@ async function request<T>(
   path: string,
   method = "GET",
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> {
   const response = await fetch(path, {
     method,
+    signal,
+    cache: "no-store",
     headers: { "content-type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
@@ -58,40 +62,71 @@ export function TaskMatchFlow({
   actor: DemoActor;
   initialTaskId?: string;
 }) {
+  const router = useRouter();
   const [items, setItems] = useState<
-    { id: string; title: string; score?: number }[]
+    { id: string; title: string; score?: number; canEdit: boolean }[]
   >([]);
   const [id, setId] = useState(initialTaskId ?? "");
   const [detail, setDetail] = useState<Detail | null>(null);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [acting, setBusy] = useState(false);
+  const busy = acting || loading;
+  const actingRef = useRef(false);
+  const activeLoad = useRef<AbortController | null>(null);
   const [stageRows, setStages] = useState<Record<string, Stage[]>>({});
   const load = useCallback(async (taskId: string) => {
-    const list = await request<{ tasks: typeof items }>("/api/tasks");
-    setItems(list.tasks);
-    if (!taskId) return;
-    const result = await request<Detail>(`/api/tasks/${taskId}`);
-    setDetail(result);
-    setId(taskId);
-    const entries = await Promise.all(
-      result.proposals
-        .filter((p) => p.status === "accepted")
-        .map(async (p) => {
-          const result = await request<Stage[]>(
-            `/api/proposals/${p.id}/stages`,
-          );
-          return [p.id, result] as const;
-        }),
-    );
-    setStages(Object.fromEntries(entries));
-  }, []);
+    activeLoad.current?.abort();
+    const controller = new AbortController();
+    activeLoad.current = controller;
+    setLoading(true);
+    setDetail(null);
+    setStages({});
+    try {
+      const list = await request<{ actor: DemoActor; tasks: typeof items }>("/api/tasks", "GET", undefined, controller.signal);
+      if (list.actor.role !== actor.role || demoActorId(list.actor) !== demoActorId(actor)) {
+        // Another tab may have switched the shared session. Refresh server props
+        // before exposing actions for the newly selected business or team.
+        setItems([]);
+        setId("");
+        controller.abort();
+        router.refresh();
+        return;
+      }
+      setItems(list.tasks);
+      const selected = list.tasks.find(task => task.id === taskId)
+        ?? (actor.role === "business" ? list.tasks.find(task => task.canEdit) : list.tasks[0]);
+      setId(selected?.id ?? "");
+      if (!selected) return;
+      const result = await request<Detail>(`/api/tasks/${selected.id}`, "GET", undefined, controller.signal);
+      const entries = await Promise.all(
+        result.proposals
+          .filter((p) => p.status === "accepted" && (actor.role === "business" || p.teamId === actor.teamId))
+          .map(async (p) => {
+            const rows = await request<Stage[]>(`/api/proposals/${p.id}/stages`, "GET", undefined, controller.signal);
+            return [p.id, rows] as const;
+          }),
+      );
+      controller.signal.throwIfAborted();
+      setDetail(result);
+      setStages(Object.fromEntries(entries));
+    } catch (failure) {
+      if (!controller.signal.aborted) throw failure;
+    } finally {
+      if (activeLoad.current === controller && !controller.signal.aborted) setLoading(false);
+    }
+  }, [actor, router]);
   useEffect(() => {
-    void Promise.resolve().then(() => load(initialTaskId ?? '')).catch(e => setError(e.message)).finally(() => setLoading(false));
+    let active = true;
+    void Promise.resolve().then(() => active ? load(initialTaskId ?? '') : undefined)
+      .catch(e => { if (active) setError(e.message); });
+    return () => { active = false; activeLoad.current?.abort(); };
   }, [initialTaskId, load]);
 
   async function act(fn: () => Promise<void>) {
+    if (actingRef.current || loading) return;
+    actingRef.current = true;
     setBusy(true);
     setError("");
     try {
@@ -99,6 +134,7 @@ export function TaskMatchFlow({
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
     } finally {
+      actingRef.current = false;
       setBusy(false);
     }
   }
@@ -107,7 +143,8 @@ export function TaskMatchFlow({
     await load(id);
   }
   const owner =
-    actor.role === "business" && detail?.task.businessId === actor.businessId;
+    actor.role === "business" && detail?.task.businessId === actor.businessId && detail.grill !== null && items.some(item => item.id === detail.task.id && item.canEdit);
+  const taskProposals = detail?.proposals.filter(proposal => owner || (actor.role === "team" && proposal.teamId === actor.teamId)) ?? [];
   const grill = detail?.grill;
   const score = detail?.task.score ?? 0;
   const level = LEVEL_LABELS[levelOf(score)];
@@ -168,7 +205,7 @@ export function TaskMatchFlow({
       <div className="grid min-h-0 items-start gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
         <aside className="overflow-hidden rounded-xl border bg-workspace-surface lg:sticky lg:top-5" aria-label="Задачи">
           <div className="border-b px-4 py-4">
-            <div className="flex items-center justify-between gap-3"><h2 className="text-sm font-bold">{actor.role === "business" ? "Мои задачи" : "Задачи"}</h2><span className="rounded-md bg-card px-2 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">{items.length}</span></div>
+            <div className="flex items-center justify-between gap-3"><h2 className="text-sm font-bold">{actor.role === "business" ? "Все задачи" : "Каталог задач"}</h2><span className="rounded-md bg-card px-2 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">{items.length}</span></div>
             <div className="relative mt-3"><Magnifier className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground" /><Input aria-label="Найти задачу" placeholder="Найти задачу…" value={query} onChange={event => setQuery(event.target.value)} className="h-10 border-transparent bg-muted pl-9 text-sm shadow-none" /></div>
           </div>
           <div className="max-h-80 space-y-1 overflow-y-auto p-2 lg:max-h-[calc(100dvh-270px)]">
@@ -182,6 +219,7 @@ export function TaskMatchFlow({
               onClick={() => void act(() => load(t.id))}
             >
               <span className="line-clamp-2 text-sm font-semibold leading-snug">{t.title}</span>
+              {actor.role === "business" && <span className="mt-1 block text-xs text-muted-foreground">{t.canEdit ? "Моя задача" : "Каталог · просмотр"}</span>}
               <span className="mt-2 flex items-center justify-between text-xs text-muted-foreground"><span>Готовность</span><span className="font-semibold tabular-nums">{t.score ?? 0}/100</span></span>
             </button>
           ))}
@@ -197,7 +235,7 @@ export function TaskMatchFlow({
                 <div className="min-w-0 flex-1">
                   <div className="mb-3 flex flex-wrap items-center gap-2 text-xs"><span className="rounded-full bg-muted px-2.5 py-1 font-medium">{STATUS_LABELS[detail.task.status] ?? detail.task.status}</span><span className="rounded-full border px-2.5 py-1 text-muted-foreground">{level}</span></div>
                   <h2 className="max-w-3xl text-xl font-bold leading-tight tracking-tight sm:text-2xl">{detail.task.title}</h2>
-                  <p className="mt-2 text-sm text-muted-foreground">Карточка задачи и следующий шаг</p>
+                  <p className="mt-2 text-sm text-muted-foreground">{actor.role === "business" && !owner ? "Опубликованная карточка · просмотр" : "Карточка задачи и следующий шаг"}</p>
                 </div>
                 <div className="min-w-32 rounded-xl bg-workspace-surface px-4 py-3 text-right"><span className="block text-[11px] font-medium text-muted-foreground">Готовность</span><span className="text-3xl font-bold tabular-nums">{score}<span className="text-base font-normal text-muted-foreground">/100</span></span></div>
               </div>
@@ -467,7 +505,7 @@ export function TaskMatchFlow({
             )}
             {actor.role === "team" &&
               ["published", "in_work"].includes(detail.task.status) &&
-              !detail.proposals.some((p) => p.status !== "rejected") && (
+              !taskProposals.some((p) => p.status !== "rejected") && (
                 <form
                   className="space-y-3 rounded-2xl border bg-card p-5 sm:p-6"
                   onSubmit={(e) => {
@@ -516,7 +554,7 @@ export function TaskMatchFlow({
                   <Button disabled={busy}>Отправить отклик</Button>
                 </form>
               )}
-            {detail.proposals.map((p) => (
+            {taskProposals.map((p) => (
               <article key={p.id} className="space-y-3 rounded-2xl border bg-card p-5 sm:p-6">
                 <h3 className="font-semibold">
                   {DEMO_TEAMS.find(team => team.id === p.teamId)?.name ?? "Отклик команды"}
@@ -602,7 +640,7 @@ export function TaskMatchFlow({
                     </p>
                     <p>{s.howToCheck}</p>
                     {s.businessComment && <p>{s.businessComment}</p>}
-                    {actor.role === "team" &&
+                    {actor.role === "team" && p.teamId === actor.teamId &&
                       ["open", "returned"].includes(s.status) && (
                         <form
                           className="space-y-2"

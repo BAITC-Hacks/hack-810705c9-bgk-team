@@ -124,7 +124,7 @@ export function assertTaskOwner(
 ): asserts actor is Extract<DemoActor, { role: "business" }> {
   assertRole(actor, "business");
   if (actor.businessId !== task.businessId) {
-    throw new ForbiddenError("Это задача другого бизнеса");
+    throw new ForbiddenError("Действие недоступно в этой карточке. Откройте свою задачу в рабочем пространстве, чтобы продолжить.");
   }
 }
 

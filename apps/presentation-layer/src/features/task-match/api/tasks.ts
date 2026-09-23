@@ -36,7 +36,7 @@ function question(node: NodeKey | null, wording?: string | null) {
 
 async function taskView(row: TaskRow) {
   const fields = await db.select().from(taskFields).where(eq(taskFields.taskId, row.id));
-  return projectWorkspaceTask(row, fields);
+  return { ...projectWorkspaceTask(row, fields), canEdit: true };
 }
 
 export async function listTasks() {
@@ -48,7 +48,7 @@ export async function listTasks() {
     if (actor.role === 'business' && actor.businessId === row.businessId) return taskView(row);
     const fields = await db.select().from(taskFields).where(eq(taskFields.taskId, row.id));
     const visible = toExecutorView({ ...row, fields });
-    return projectWorkspaceTask({ ...row, description: '' }, fields.filter(f => visible.fields.some(v => v.node === f.node)));
+    return { ...projectWorkspaceTask({ ...row, description: '' }, fields.filter(f => visible.fields.some(v => v.node === f.node))), canEdit: false };
   }));
   const sessions = await db.select().from(grillSessions);
   const questions: Record<string, NonNullable<ReturnType<typeof question>>> = {};
@@ -58,7 +58,7 @@ export async function listTasks() {
     const last = await db.select().from(grillTurns).where(eq(grillTurns.sessionId, session.id)).orderBy(desc(grillTurns.createdAt)).limit(1);
     questions[session.taskId] = question(session.currentNode, last[0]?.question)!;
   }
-  return { tasks: views, questions, proposals: visibleProposals(actor, all, rows) };
+  return { actor, tasks: views, questions, proposals: visibleProposals(actor, all, rows) };
 }
 
 
