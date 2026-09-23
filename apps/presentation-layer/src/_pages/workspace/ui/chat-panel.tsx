@@ -6,7 +6,9 @@ import {
   At,
   FileText,
   Keyboard,
+  Microphone,
   Persons,
+  StopFill,
   Xmark,
 } from "@gravity-ui/icons";
 import {
@@ -38,6 +40,8 @@ import {
 } from "./chat-skills";
 import { analyzeTaskLocally } from "./local-ai-analysis";
 import { useAsyncAction } from "@/shared/hooks/use-async-action";
+import { useSpeechInput } from "@/shared/hooks/use-speech-input";
+import { appendVoiceTranscript } from "@/shared/lib/speech-recognition";
 
 type Props = {
   task: Task;
@@ -77,7 +81,19 @@ export function ChatPanel({
   onShowShortcuts,
 }: Props) {
   const [input, setInput] = useState("");
+  const inputValueRef = useRef("");
+  const [voiceRemainder, setVoiceRemainder] = useState("");
   const { pending, error, run } = useAsyncAction();
+  const voice = useSpeechInput(task.id, (text) => {
+    const result = appendVoiceTranscript(inputValueRef.current, text);
+    inputValueRef.current = result.text;
+    setInput(result.text);
+    if (result.remainder) {
+      setVoiceRemainder((current) => [current, result.remainder].filter(Boolean).join(" "));
+    }
+  });
+  const { busy: voiceBusy, stop: stopVoice } = voice;
+  const composerBusy = pending || voice.busy;
   const [answerField, setAnswerField] = useState<TaskField | undefined>();
   const [selectedSkill, setSelectedSkill] = useState<ChatSkillId | undefined>();
   const [menuMode, setMenuMode] = useState<"mention" | "manual" | null>(null);
@@ -111,6 +127,12 @@ export function ChatPanel({
     ? `${menuId}-${options[activeIndex].id}`
     : undefined;
 
+  useEffect(() => { inputValueRef.current = input; }, [input]);
+
+  useEffect(() => {
+    if (voiceRemainder && voiceBusy) stopVoice();
+  }, [voiceRemainder, voiceBusy, stopVoice]);
+
   useEffect(() => {
     if (!menuOpen) return;
     function onPointerDown(event: PointerEvent) {
@@ -129,7 +151,7 @@ export function ChatPanel({
   }, [activeOptionId, menuOpen]);
 
   function pickOption(option: ChatOption) {
-    if (pending) return;
+    if (composerBusy) return;
     const updatedInput =
       mention && menuMode === "mention" ? removeMention(input, mention) : input;
     const nextCaret = mention && menuMode === "mention" ? mention.start : caret;
@@ -150,6 +172,7 @@ export function ChatPanel({
   }
 
   async function send() {
+    if (composerBusy || voiceRemainder) return;
     if (!input.trim() && !selectedSkill) return;
     if (!await run(() => onSend(
       input.trim(),
@@ -164,7 +187,7 @@ export function ChatPanel({
     requestAnimationFrame(() => inputRef.current?.focus());
   }
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col" data-voice-active={voice.busy}>
       <Conversation className="min-h-0 overflow-hidden">
         <ConversationContent
           scrollClassName="workspace-scroll"
@@ -184,7 +207,7 @@ export function ChatPanel({
                 <span className="text-[15px] font-bold">AI-Sana</span>
                 <Dialog onOpenChange={(open) => { if (!open) setSimulateMalformed(false); }}>
                   <DialogTrigger asChild>
-                    <button type="button" className="rounded text-xs text-muted-foreground underline decoration-dotted underline-offset-4 hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary">
+                    <button type="button" disabled={voice.busy} className="rounded text-xs text-muted-foreground underline decoration-dotted underline-offset-4 hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50">
                       Демо-ассистент
                     </button>
                   </DialogTrigger>
@@ -232,7 +255,7 @@ export function ChatPanel({
                       <button
                         type="button"
                         key={question.field}
-                        disabled={pending}
+                        disabled={composerBusy}
                         aria-pressed={answerField === question.field}
                         onClick={() => {
                           setAnswerField(question.field);
@@ -259,11 +282,11 @@ export function ChatPanel({
                 </>
               )}
               {questions.length === 0 ? (
-                <Button type="button" variant="outline" size="sm" className="mt-4" onClick={pendingConfirmation.length || task.status === "draft" ? onEdit : onShowProposals}>
+                <Button type="button" variant="outline" size="sm" disabled={voice.busy} className="mt-4" onClick={pendingConfirmation.length || task.status === "draft" ? onEdit : onShowProposals}>
                   {pendingConfirmation.length ? "Проверить и подтвердить ответы" : task.status === "draft" ? "Опубликовать карточку" : "Открыть отклики"}
                 </Button>
               ) : pendingConfirmation.length > 0 && (
-                <button type="button" onClick={onEdit} className="mt-3 rounded text-xs font-medium text-muted-foreground underline underline-offset-4 hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary">
+                <button type="button" disabled={voice.busy} onClick={onEdit} className="mt-3 rounded text-xs font-medium text-muted-foreground underline underline-offset-4 hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50">
                   Проверить внесённые ответы · {pendingConfirmation.length}
                 </button>
               )}
@@ -327,7 +350,7 @@ export function ChatPanel({
                     <button
                       type="button"
                       key={option.id}
-                      disabled={pending}
+                      disabled={composerBusy}
                       id={`${menuId}-${option.id}`}
                       role="option"
                       aria-selected={activeIndex === index}
@@ -381,7 +404,7 @@ export function ChatPanel({
               <button
                 type="button"
                 aria-label={`Убрать навык: ${skill.label}`}
-                disabled={pending}
+                disabled={composerBusy}
                 onClick={() => {
                   setSelectedSkill(undefined);
                   inputRef.current?.focus();
@@ -399,7 +422,7 @@ export function ChatPanel({
                 type="button"
                 onClick={() => setAnswerField(undefined)}
                 aria-label="Отменить выбор вопроса"
-                disabled={pending}
+                disabled={composerBusy}
                 className="flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-workspace-selected focus-visible:outline-2 focus-visible:outline-primary"
               >
                 <Xmark className="size-3" />
@@ -411,6 +434,7 @@ export function ChatPanel({
           </label>
           <textarea
             disabled={pending}
+            readOnly={voice.busy}
             id="chat-message"
             ref={inputRef}
             value={input}
@@ -419,7 +443,7 @@ export function ChatPanel({
             aria-expanded={menuOpen}
             aria-controls={menuOpen ? menuId : undefined}
             aria-activedescendant={menuOpen ? activeOptionId : undefined}
-            aria-describedby={error ? "chat-save-error" : undefined}
+            aria-describedby={[error && "chat-save-error", voice.message && "chat-voice-status", voiceRemainder && "chat-voice-remainder"].filter(Boolean).join(" ") || undefined}
             onChange={(event) => {
               const value = event.target.value;
               const position = event.target.selectionStart;
@@ -430,6 +454,10 @@ export function ChatPanel({
             }}
             onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
             onKeyDown={(event) => {
+              if (voice.busy) {
+                if (event.key === "Enter") event.preventDefault();
+                return;
+              }
               if (event.nativeEvent.isComposing || event.keyCode === 229)
                 return;
               if (menuOpen) {
@@ -485,7 +513,7 @@ export function ChatPanel({
                 variant="ghost"
                 size="icon"
                 aria-label="Навыки и действия"
-                disabled={pending}
+                disabled={composerBusy}
                 title="Навыки и действия (@)"
                 aria-haspopup="listbox"
                 aria-expanded={menuOpen}
@@ -503,6 +531,7 @@ export function ChatPanel({
                 variant="ghost"
                 size="icon"
                 aria-label="Открыть карточку задачи"
+                disabled={voice.busy}
                 title="Карточка задачи"
                 onClick={onEdit}
                 className="size-8 rounded-lg text-muted-foreground hover:text-foreground"
@@ -514,14 +543,33 @@ export function ChatPanel({
                 variant="ghost"
                 size="icon"
                 aria-label="Горячие клавиши"
+                disabled={voice.busy}
                 title="Горячие клавиши"
                 onClick={onShowShortcuts}
                 className="size-8 rounded-lg text-muted-foreground hover:text-foreground"
               >
                 <Keyboard className="size-[18px]" />
               </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={voice.busy ? "Остановить диктовку" : "Ввести голосом"}
+                aria-pressed={voice.busy}
+                disabled={pending || voice.phase === "stopping" || (!voice.busy && (!!voiceRemainder || input.length >= 4000))}
+                title={voice.busy ? "Остановить диктовку" : voiceRemainder ? "Сначала проверьте не поместившуюся фразу" : input.length >= 4000 ? "Лимит 4000 символов. Сократите текст для диктовки." : "Ввести голосом. Браузер может передавать звук сервису распознавания; нужен доступ к микрофону и может понадобиться интернет."}
+                onClick={() => {
+                  setMenuMode(null);
+                  if (voice.busy) voice.stop();
+                  else voice.start();
+                }}
+                className={cn("size-8 rounded-lg", voice.busy ? "bg-foreground text-background hover:bg-foreground/85 hover:text-background" : "text-muted-foreground hover:text-foreground")}
+              >
+                {voice.busy ? <StopFill className="size-4" /> : <Microphone className="size-[18px]" />}
+              </Button>
             </div>
             <div className="flex items-center gap-3">
+              {input.length >= 3900 && <span className="text-[11px] text-muted-foreground tabular-nums">{input.length} / 4000</span>}
               <span className="hidden text-[11px] text-muted-foreground xl:inline">
                 Shift + Enter ↵
               </span>
@@ -529,13 +577,28 @@ export function ChatPanel({
                 size="icon"
                 type="submit"
                 aria-label="Отправить сообщение"
-                disabled={pending || (!input.trim() && !selectedSkill)}
+                disabled={composerBusy || !!voiceRemainder || (!input.trim() && !selectedSkill)}
                 className="size-9 rounded-full disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
               >
                 <ArrowUp className="size-[18px]" />
               </Button>
             </div>
           </div>
+          {voice.message && (
+            <div id="chat-voice-status" className="mt-3 border-t pt-2.5 text-xs leading-relaxed text-muted-foreground">
+              <p role={voice.phase === "error" || voice.phase === "unsupported" ? "alert" : "status"} className="font-medium text-foreground">{voice.message}</p>
+              {voice.interim && <p className="mt-1 max-h-16 overflow-y-auto">Распознаётся: {voice.interim}</p>}
+              {voice.busy && <p className="mt-1">Браузер может передавать звук сервису распознавания. Отправка сообщения — только вручную.</p>}
+            </div>
+          )}
+          {voiceRemainder && (
+            <div id="chat-voice-remainder" className="mt-3 rounded-lg border bg-muted p-3 text-xs leading-relaxed">
+              <p role="alert" className="font-semibold">Последняя фраза не поместилась в лимит 4000 символов.</p>
+              <p className="mt-1 text-muted-foreground">Она сохранена ниже и не войдёт в сообщение. Сократите текст в поле и перенесите нужные слова перед отправкой.</p>
+              <p className="mt-2 max-h-20 overflow-y-auto select-text">{voiceRemainder}</p>
+              <button type="button" disabled={voice.busy} onClick={() => setVoiceRemainder("")} className="mt-2 font-semibold underline underline-offset-4 disabled:opacity-50">Проверено — продолжить с текстом в поле</button>
+            </div>
+          )}
         </form>
         <p className="mt-2 text-center text-[11px] leading-normal text-muted-foreground">
           Демо-ответы. Проверьте карточку перед публикацией.

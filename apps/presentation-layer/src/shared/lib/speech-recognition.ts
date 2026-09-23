@@ -67,12 +67,12 @@ export function createBrowserRecognition(): BrowserRecognition | null {
   return Recognition ? new Recognition() : null;
 }
 
-export function appendVoiceTranscript(draft: string, transcript: string, limit = 4000): string {
+export function appendVoiceTranscript(draft: string, transcript: string, limit = 4000): { text: string; remainder: string } {
   const text = transcript.trim();
-  if (!text || draft.length >= limit) return draft;
+  if (!text) return { text: draft, remainder: "" };
   const separator = draft && !/\s$/.test(draft) && !/^[.,!?;:)]/.test(text) ? " " : "";
-  const room = limit - draft.length - separator.length;
-  return room > 0 ? draft + separator + text.slice(0, room) : draft;
+  const next = draft + separator + text;
+  return next.length <= limit ? { text: next, remainder: "" } : { text: draft, remainder: text };
 }
 
 type Options = {
@@ -121,6 +121,7 @@ export function createSpeechController({ createRecognition, onState, onFinal, sc
 
   return {
     getState: () => state,
+    setOnFinal(listener: (transcript: string) => void) { onFinal = listener; },
     start() {
       if (speechIsBusy(state)) return;
       release(true);
