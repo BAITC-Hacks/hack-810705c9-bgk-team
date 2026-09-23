@@ -11,13 +11,27 @@ import {
   VIEW_COOKIE,
   parseDemoActor,
   parseDemoView,
+  requireDemoActorFrom,
   type DemoActor,
   type DemoView,
 } from "./demo-actor";
 
+/** Для страниц: мягкий разбор с участником по умолчанию (cookie ставит `proxy.ts`). */
 export async function getDemoActor(): Promise<DemoActor> {
   const jar = await cookies();
   return parseDemoActor({
+    role: jar.get(ROLE_COOKIE)?.value,
+    actor: jar.get(ACTOR_COOKIE)?.value,
+  });
+}
+
+/**
+ * Для route handlers и server actions: без валидных cookie бросает
+ * ForbiddenError («Выберите демо-роль»), чтобы curl без cookie получал 403.
+ */
+export async function requireDemoActor(): Promise<DemoActor> {
+  const jar = await cookies();
+  return requireDemoActorFrom({
     role: jar.get(ROLE_COOKIE)?.value,
     actor: jar.get(ACTOR_COOKIE)?.value,
   });

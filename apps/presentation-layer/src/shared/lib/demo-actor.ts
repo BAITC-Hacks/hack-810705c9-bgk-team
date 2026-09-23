@@ -65,11 +65,26 @@ export function toDemoActor(role: unknown, actorId: unknown): DemoActor | null {
 }
 
 /**
- * Разбирает cookie `tm_role` / `tm_actor`. Неизвестный участник заменяется
- * первым из seed для указанной роли; без валидной роли — первый демо-бизнес.
+ * Строгий разбор cookie `tm_role` / `tm_actor` для API и use-case:
+ * `null`, если роли нет, она неизвестна или id не из seed-списка этой роли.
+ */
+export function resolveDemoActor(values: DemoCookieValues): DemoActor | null {
+  return toDemoActor(values.role, values.actor);
+}
+
+/** Строгий вариант для API: без валидной пары cookie — 403, без подстановки по умолчанию. */
+export function requireDemoActorFrom(values: DemoCookieValues): DemoActor {
+  const actor = resolveDemoActor(values);
+  if (!actor) throw new ForbiddenError("Выберите демо-роль");
+  return actor;
+}
+
+/**
+ * Мягкий разбор для страниц и proxy: неизвестный участник заменяется первым
+ * из seed для указанной роли; без валидной роли — первый демо-бизнес.
  */
 export function parseDemoActor(values: DemoCookieValues): DemoActor {
-  const exact = toDemoActor(values.role, values.actor);
+  const exact = resolveDemoActor(values);
   if (exact) return exact;
   if (values.role === "team") return { role: "team", teamId: DEFAULT_DEMO_TEAM.id };
   return DEFAULT_DEMO_ACTOR;

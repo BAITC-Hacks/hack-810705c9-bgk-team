@@ -12,6 +12,8 @@ import {
   forbiddenResponse,
   parseDemoActor,
   parseDemoView,
+  requireDemoActorFrom,
+  resolveDemoActor,
   type DemoActor,
 } from "./demo-actor";
 
@@ -47,6 +49,40 @@ describe("parseDemoActor", () => {
 
   it("неизвестная роль → бизнес по умолчанию", () => {
     assert.deepEqual(parseDemoActor({ role: "admin", actor: bizB.id }), DEFAULT_DEMO_ACTOR);
+  });
+});
+
+describe("строгий разбор для API", () => {
+  it("resolveDemoActor: null без cookie, с неизвестной ролью или устаревшим id", () => {
+    assert.equal(resolveDemoActor({}), null);
+    assert.equal(resolveDemoActor({ role: "admin", actor: bizA.id }), null);
+    assert.equal(resolveDemoActor({ role: "team", actor: "stale-team-id" }), null);
+    assert.equal(resolveDemoActor({ role: "team", actor: bizA.id }), null);
+    assert.deepEqual(resolveDemoActor({ role: "team", actor: dataBrew.id }), {
+      role: "team",
+      teamId: dataBrew.id,
+    });
+  });
+
+  it("requireDemoActorFrom: без cookie → 403 «Выберите демо-роль»", async () => {
+    let error: unknown;
+    try {
+      requireDemoActorFrom({});
+    } catch (caught) {
+      error = caught;
+    }
+    const response = forbiddenResponse(error);
+    assert.equal(response?.status, 403);
+    assert.deepEqual(await response?.json(), {
+      error: { code: "forbidden", message: "Выберите демо-роль" },
+    });
+  });
+
+  it("requireDemoActorFrom: устаревший id команды → 403, а не BotForge", () => {
+    assert.throws(
+      () => requireDemoActorFrom({ role: "team", actor: "stale-team-id" }),
+      ForbiddenError,
+    );
   });
 });
 
