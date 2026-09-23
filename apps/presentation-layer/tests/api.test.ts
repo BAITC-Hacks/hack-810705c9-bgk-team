@@ -6,7 +6,12 @@ import { NextRequest } from 'next/server';
 import { POST as createTaskRoute } from '../app/api/tasks/route';
 import { PATCH as patchFieldRoute } from '../app/api/tasks/[id]/fields/[node]/route';
 import { POST as grillTurnRoute } from '../app/api/tasks/[id]/grill/turn/route';
+import { POST as publishTaskRoute } from '../app/api/tasks/[id]/publish/route';
 import { POST as decisionRoute } from '../app/api/proposals/[id]/decision/route';
+
+import type { AiPort } from '@/shared/api/ports';
+import { submitGrillTurn } from '@/features/grill/api/submit-turn';
+import type { TransactionRunner } from '@/shared/db/transaction';
 
 /**
  * ADR-009 §8 (проверка): прогон route handler'ов напрямую, без поднятия
@@ -76,6 +81,23 @@ describe('POST /api/tasks — валидация черновика (FR-1.1, NFR
     assert.equal(response.status, 400);
     const body = await response.json();
     assert.equal(body.error.code, 'invalid_json');
+  });
+
+  it('ход без sessionVersion -> 422 с русским сообщением zod (z.locales.ru)', async () => {
+    const { task } = await createDraftTask('biz-locale');
+    const response = await grillTurnRoute(
+      req(`/api/tasks/${task.id}/grill/turn`, {
+        method: 'POST',
+        role: 'business',
+        actorId: 'biz-locale',
+        body: { answer: 'ответ' },
+      }),
+      { params: Promise.resolve({ id: task.id }) },
+    );
+    assert.equal(response.status, 422);
+    const body = await response.json();
+    assert.equal(body.error.code, 'validation_error');
+    assert.match(body.error.message, /[а-яёА-ЯЁ]/, 'сообщение должно быть по-русски');
   });
 
   it('создаёт задачу и возвращает checkpoint черновика', async () => {
@@ -160,12 +182,89 @@ describe('POST /api/tasks/:id/grill/turn — роли, версия, fallback (A
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.fallbackUsed, true);
-    // Версия сессии продвинулась -> транзакция записи выполнилась ПОСЛЕ
-    // того, как AI-вызов (снаружи транзакции, ADR-009 §5) завершился ошибкой
-    // и код перешёл к шаблону. Это структурно подтверждает порядок
-    // «сначала AI (или его неудача), затем короткая запись».
     assert.equal(body.sessionVersion, 1);
     assert.ok(body.next.kind === 'question' || body.next.kind === 'checkpoint');
+  });
+
+  it('AI-вызовы выполняются ДО открытия транзакции записи (ADR-009 §5)', async () => {
+    const { task } = await createDraftTask('biz-order');
+
+    let txOpen = false;
+    const aiCallsWhileTxOpen: string[] = [];
+    const fakeAiPort: AiPort = {
+      async analyzeText() {
+        if (txOpen) aiCallsWhileTxOpen.push('analyzeText');
+        // Форсируем fallback, чтобы детерминированно пройти весь путь
+        // (включая phraseQuestion для следующего вопроса) без сети.
+        throw new Error('forced failure to exercise the fallback path deterministically');
+      },
+      async phraseQuestion() {
+        if (txOpen) aiCallsWhileTxOpen.push('phraseQuestion');
+        throw new Error('forced failure');
+      },
+    };
+    const fakeTxRunner: TransactionRunner = async (fn) => {
+      txOpen = true;
+      try {
+        return await fn({});
+      } finally {
+        txOpen = false;
+      }
+    };
+
+    const result = await submitGrillTurn(
+      { role: 'business', businessId: 'biz-order' },
+      task.id,
+      { answer: 'Процесс делаем вручную в Excel', sessionVersion: 0 },
+      fakeAiPort,
+      fakeTxRunner,
+    );
+
+    assert.equal(result.fallbackUsed, true);
+    assert.equal(result.sessionVersion, 1);
+    assert.deepEqual(
+      aiCallsWhileTxOpen,
+      [],
+      'ни analyzeText, ни phraseQuestion не должны вызываться, пока открыта транзакция записи',
+    );
+  });
+
+  it('гонка: два хода с одной sessionVersion -> ровно один 200 и один 409', async () => {
+    const { task } = await createDraftTask('biz-race');
+
+    const attempt = () =>
+      grillTurnRoute(
+        req(`/api/tasks/${task.id}/grill/turn`, {
+          method: 'POST',
+          role: 'business',
+          actorId: 'biz-race',
+          body: { answer: 'Ответ на гонку версий', sessionVersion: 0 },
+        }),
+        { params: Promise.resolve({ id: task.id }) },
+      );
+
+    const results = await Promise.allSettled([attempt(), attempt()]);
+    const statuses = results.map((r) => (r.status === 'fulfilled' ? r.value.status : -1)).sort();
+    assert.deepEqual(statuses, [200, 409]);
+  });
+});
+
+describe('POST /api/tasks/:id/publish — недопустимый переход состояния (раздел 9.2)', () => {
+  it('повторная публикация -> 409, не 422', async () => {
+    const { task } = await createDraftTask('biz-publish');
+    const first = await publishTaskRoute(
+      req(`/api/tasks/${task.id}/publish`, { method: 'POST', role: 'business', actorId: 'biz-publish' }),
+      { params: Promise.resolve({ id: task.id }) },
+    );
+    assert.equal(first.status, 200);
+
+    const second = await publishTaskRoute(
+      req(`/api/tasks/${task.id}/publish`, { method: 'POST', role: 'business', actorId: 'biz-publish' }),
+      { params: Promise.resolve({ id: task.id }) },
+    );
+    assert.equal(second.status, 409);
+    const body = await second.json();
+    assert.equal(body.error.code, 'conflict');
   });
 });
 
