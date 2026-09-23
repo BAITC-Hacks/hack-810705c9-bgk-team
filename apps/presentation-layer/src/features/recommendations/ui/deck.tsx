@@ -88,9 +88,9 @@ export function Deck({
 
   if (!current) {
     return (
-      <div className="mx-auto flex max-w-md flex-col items-center gap-3 rounded-xl border border-dashed p-8 text-center">
-        <p className="font-medium">Колода закончилась</p>
-        <p className="text-sm text-muted-foreground">
+      <div className="mx-auto flex min-h-72 w-full max-w-xl flex-col items-center justify-center gap-3 rounded-2xl border bg-card px-6 py-12 text-center">
+        <h2 className="text-lg font-semibold tracking-tight">Вы просмотрели подборку</h2>
+        <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
           Рекомендации не ограничивают выбор: откликнуться можно на любую задачу.
         </p>
         <Button asChild>
@@ -108,8 +108,8 @@ export function Deck({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-md flex-col gap-3">
-      <p className="text-center text-xs text-muted-foreground">
+    <div className="mx-auto flex w-full max-w-xl flex-col gap-4">
+      <p className="text-center text-xs font-medium tabular-nums text-muted-foreground">
         {Math.min(position, items.length) + 1} из {items.length}
       </p>
       <div className="relative min-h-72">
@@ -124,7 +124,7 @@ export function Deck({
             transition={{ duration: 0.22 }}
           >
             <TaskTile
-              className="shadow-lg"
+              className="rounded-2xl border border-border p-5 shadow-none ring-0 sm:p-6"
               task={current.task}
               fit={{
                 percent: fitPercent(current.fit.value),
@@ -142,7 +142,7 @@ export function Deck({
           </motion.div>
         </AnimatePresence>
       </div>
-      <p className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+      <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
         <Kbd>←</Kbd> не сейчас <Kbd>→</Kbd> откликнуться <Kbd>↑</Kbd> не хватает сведений
       </p>
     </div>

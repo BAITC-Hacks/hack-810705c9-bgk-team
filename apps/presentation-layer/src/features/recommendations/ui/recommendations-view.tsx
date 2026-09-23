@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LayoutGrid, Layers, List } from "lucide-react";
+import { LayoutGrid, Layers } from "lucide-react";
 import { toast } from "sonner";
 import { setViewMode } from "@/features/recommendations/api/set-view-mode";
 import { useSwipe } from "@/features/swipe/ui/use-swipe";
@@ -12,7 +12,6 @@ import type {
   RecommendationsResponse,
   ViewMode,
 } from "@/shared/api/contracts/task-match";
-import { Button } from "@/shared/components/ui/button";
 import { Toaster } from "@/shared/components/ui/sonner";
 import { ToggleGroup, ToggleGroupItem } from "@/shared/components/ui/toggle-group";
 import { Deck } from "./deck";
@@ -79,27 +78,28 @@ export function RecommendationsView({ teamId, initial, view: initialView }: Prop
   };
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border bg-card p-4 sm:p-5">
+        <div>
+          <p className="text-sm font-semibold">Подборка для вашей команды</p>
+          <p className="mt-1 text-xs text-muted-foreground" aria-live="polite">Доступно задач: {items.length}</p>
+        </div>
         <ToggleGroup
           type="single"
-          variant="outline"
+          variant="default"
+          className="rounded-xl bg-muted p-1"
           value={view}
           onValueChange={(value) => value && changeView(value as ViewMode)}
           aria-label="Вид рекомендаций"
         >
-          <ToggleGroupItem value="deck">
+          <ToggleGroupItem value="deck" className="rounded-lg px-3 text-xs font-semibold data-[state=on]:bg-card data-[state=on]:shadow-sm">
             <Layers /> Колода
           </ToggleGroupItem>
-          <ToggleGroupItem value="grid">
+          <ToggleGroupItem value="grid" className="rounded-lg px-3 text-xs font-semibold data-[state=on]:bg-card data-[state=on]:shadow-sm">
             <LayoutGrid /> Сетка
           </ToggleGroupItem>
         </ToggleGroup>
-        <Button asChild variant="outline">
-          <Link href="/catalog">
-            <List data-icon="inline-start" /> Все задачи
-          </Link>
-        </Button>
+
       </div>
 
       {view === "deck" ? (
@@ -112,10 +112,11 @@ export function RecommendationsView({ teamId, initial, view: initialView }: Prop
       ) : items.length > 0 ? (
         <Grid {...handlers} items={items} />
       ) : (
-        <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-          Рекомендаций пока нет.{" "}
-          <Link className="text-foreground underline" href="/catalog">
-            В каталоге ещё {initial.catalogRemainder} задач
+        <div className="flex min-h-64 flex-col items-center justify-center rounded-2xl border bg-card px-6 py-12 text-center">
+          <h2 className="text-lg font-semibold tracking-tight">Рекомендаций пока нет</h2>
+          <p className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">Посмотрите общий каталог — откликнуться можно и на задачи за пределами подборки.</p>
+          <Link className="mt-5 rounded-lg text-sm font-semibold text-foreground underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-ring" href="/catalog">
+            Перейти в каталог · {initial.catalogRemainder}
           </Link>
         </div>
       )}

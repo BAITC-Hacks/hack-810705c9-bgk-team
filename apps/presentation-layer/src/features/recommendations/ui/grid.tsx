@@ -9,7 +9,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/shared/components/ui/toggle-grou
 import { TaskActions } from "./task-actions";
 
 const SORT_OPTIONS: { value: GridSort; label: string }[] = [
-  { value: "default", label: "По умолчанию" },
+  { value: "default", label: "Рекомендуемые" },
   { value: "fit", label: "По совпадению" },
   { value: "score", label: "По рейтингу" },
 ];
@@ -32,13 +32,14 @@ export function Grid({ items, pending, onRespond, onSkip, onMissing }: Props) {
       <ToggleGroup
         type="single"
         size="sm"
-        variant="outline"
+        variant="default"
+        className="max-w-full flex-wrap justify-start rounded-xl bg-muted p-1"
         value={sort}
         onValueChange={(value) => value && setSort(value as GridSort)}
         aria-label="Сортировка"
       >
         {SORT_OPTIONS.map((option) => (
-          <ToggleGroupItem key={option.value} value={option.value}>
+          <ToggleGroupItem key={option.value} value={option.value} className="rounded-lg px-3 text-xs font-semibold data-[state=on]:bg-card data-[state=on]:shadow-sm">
             {option.label}
           </ToggleGroupItem>
         ))}
@@ -47,6 +48,7 @@ export function Grid({ items, pending, onRespond, onSkip, onMissing }: Props) {
         {sorted.map((item) => (
           <TaskTile
             key={item.task.id}
+            className="rounded-2xl border border-border p-5 shadow-none ring-0"
             task={item.task}
             fit={{
               percent: fitPercent(item.fit.value),

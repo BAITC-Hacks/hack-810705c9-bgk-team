@@ -3,12 +3,13 @@ import type { Engagement, TaskTile as TaskTileData } from "@/shared/api/contract
 import { catalogBadge, LEVEL_LABELS } from "@/entities/task/model/level";
 import { ROLE_LABELS } from "@/entities/team/model/types";
 import { Badge } from "@/shared/components/ui/badge";
+import { NODE_META } from "@/entities/task/model/nodes";
 import { cn } from "@/shared/lib/utils";
 
 export const ENGAGEMENT_LABELS: Record<Engagement, string> = {
   paid: "подработка",
   practice: "практика",
-  both: "оба",
+  both: "практика и подработка",
 };
 
 type Props = {
@@ -29,14 +30,14 @@ export function TaskTile({ task, fit, actions, className }: Props) {
     <article
       data-level={task.level}
       className={cn(
-        "flex flex-col gap-3 rounded-xl bg-card p-4 text-sm text-card-foreground ring-1 ring-foreground/10",
-        priority && "bg-amber-50/60 ring-2 ring-amber-400 dark:bg-amber-400/10",
+        "flex flex-col gap-4 rounded-2xl border bg-card p-5 text-sm text-card-foreground transition-colors hover:border-foreground/25",
+        priority && "border-foreground/30",
         className,
       )}
     >
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="font-medium leading-snug">{task.title}</h3>
+          <h3 className="text-base font-semibold leading-snug tracking-tight">{task.title}</h3>
           <p className="text-xs text-muted-foreground">{task.company}</p>
         </div>
         {fit && (
@@ -55,7 +56,7 @@ export function TaskTile({ task, fit, actions, className }: Props) {
         {badge && (
           <Badge
             className={cn(
-              priority && "bg-amber-400 text-amber-950",
+              priority && "bg-primary text-primary-foreground",
               draft && "bg-destructive/10 text-destructive",
             )}
           >
@@ -77,13 +78,13 @@ export function TaskTile({ task, fit, actions, className }: Props) {
           <p className="font-medium">Пока неизвестно</p>
           <ul className="mt-1 list-inside list-disc text-muted-foreground">
             {task.unknown.map((item) => (
-              <li key={item}>{item}</li>
+              <li key={item}>{NODE_META[item as keyof typeof NODE_META]?.label ?? ({ context: "Контекст задачи", criteria: "Критерии успеха", data: "Данные и материалы", result: "Ожидаемый результат", constraints: "Сроки и ограничения", users: "Пользователи", link: "Контакт и связь" } as Record<string, string>)[item] ?? item}</li>
             ))}
           </ul>
         </div>
       )}
 
-      {actions && <footer className="mt-auto flex flex-wrap gap-2 pt-1">{actions}</footer>}
+      {actions && <footer className="mt-auto flex flex-wrap gap-2 border-t pt-4">{actions}</footer>}
     </article>
   );
 }

@@ -29,12 +29,12 @@ export default async function TeamRecommendationsPage({
   const team = SEED_TEAMS.find((item) => item.id === teamId);
 
   return (
-    <main className="h-dvh overflow-y-auto">
-      <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8">
+    <main className="w-full">
+      <div className="mx-auto flex max-w-[1440px] flex-col gap-6 px-4 py-6 text-sm lg:px-8 lg:py-8">
         <header className="flex flex-col gap-3">
           <div>
-            <h1 className="text-2xl font-semibold">Рекомендации команды</h1>
-            <p className="text-sm text-muted-foreground">
+            <h1 className="text-2xl font-semibold tracking-tight">Рекомендации команды</h1>
+            <p className="mt-2 text-sm text-muted-foreground">
               {team ? `${team.name}: ` : ""}
               задачи по ролям, навыкам и теме. Каталог доступен всегда.
             </p>

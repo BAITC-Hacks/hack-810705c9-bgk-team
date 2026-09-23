@@ -46,10 +46,10 @@ export function DemoRoleSwitch({ actor, view }: Props) {
       role="region"
       aria-label="Демо-роль"
       aria-busy={pending}
-      className="fixed bottom-2 left-2 z-50 flex max-w-[calc(100vw-1rem)] flex-wrap items-center gap-1.5 rounded-xl border bg-background/95 p-1.5 text-xs shadow-sm backdrop-blur"
+      className="fixed bottom-3 left-3 z-50 flex max-w-[calc(100vw-1.5rem)] flex-wrap items-center gap-2 rounded-2xl border bg-card/95 p-2 text-xs shadow-lg shadow-black/5 backdrop-blur sm:bottom-4 sm:left-4"
     >
       <Badge variant="outline" title="Cookie можно подделать. Только для локального демо.">
-        Демо-режим, без аутентификации
+        Демо · без авторизации
       </Badge>
       <NativeSelect
         size="sm"

@@ -19,13 +19,13 @@ export function TaskActions({
 }: TaskActionHandlers & { pending?: boolean; size?: "sm" | "default" }) {
   return (
     <>
-      <Button size={size} onClick={onRespond}>
+      <Button size={size} className="h-10 flex-1 rounded-xl font-semibold" onClick={onRespond}>
         Откликнуться <ArrowRight data-icon="inline-end" />
       </Button>
-      <Button size={size} variant="outline" disabled={pending} onClick={onSkip}>
+      <Button size={size} className="h-10 rounded-xl font-semibold" variant="outline" disabled={pending} onClick={onSkip}>
         <ArrowLeft data-icon="inline-start" /> Не сейчас
       </Button>
-      <Button size={size} variant="ghost" disabled={pending} onClick={onMissing}>
+      <Button size={size} className="h-9 w-full rounded-xl text-xs text-muted-foreground" variant="ghost" disabled={pending} onClick={onMissing}>
         <ArrowUp data-icon="inline-start" /> Не хватает сведений
       </Button>
     </>

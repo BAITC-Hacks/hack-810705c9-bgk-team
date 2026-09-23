@@ -10,7 +10,7 @@ import { ROLE_LABELS } from "@/entities/team/model/types";
 import type { CatalogQuery, CatalogResponse } from "@/shared/api/contracts/task-match";
 import { Button } from "@/shared/components/ui/button";
 import { Label } from "@/shared/components/ui/label";
-import { NativeSelect, NativeSelectOption } from "@/shared/components/ui/native-select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/components/ui/select";
 import { Toaster } from "@/shared/components/ui/sonner";
 import { cn } from "@/shared/lib/utils";
 
@@ -60,25 +60,24 @@ export function CatalogView({ initial, filters }: Props) {
   ];
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-end gap-3">
+    <div className="flex flex-col gap-5" aria-busy={loading}>
+      <div className="flex flex-wrap items-end gap-3 rounded-2xl border bg-card p-4 sm:p-5">
         {selects.map((select) => (
-          <div key={select.key} className="flex flex-col gap-1.5">
+          <div key={select.key} className="flex min-w-36 flex-1 flex-col gap-2">
             <Label htmlFor={`filter-${select.key}`} className="text-xs text-muted-foreground">
               {select.label}
             </Label>
-            <NativeSelect
-              id={`filter-${select.key}`}
-              value={filters[select.key] ?? ""}
-              onChange={(event) => setFilter(select.key, event.target.value)}
-            >
-              <NativeSelectOption value="">Все</NativeSelectOption>
-              {select.options.map(([value, label]) => (
-                <NativeSelectOption key={value} value={value}>
-                  {label}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
+            <Select value={filters[select.key] || "all"} onValueChange={(value) => setFilter(select.key, value === "all" ? "" : value)} disabled={loading}>
+              <SelectTrigger id={`filter-${select.key}`} className="h-10 w-full rounded-xl bg-background text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все</SelectItem>
+                {select.options.map(([value, label]) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         ))}
         {Object.values(filters).some(Boolean) && (
@@ -92,9 +91,14 @@ export function CatalogView({ initial, filters }: Props) {
         )}
       </div>
 
+      <p className="text-xs text-muted-foreground" role="status">
+        {loading ? "Обновляем задачи…" : `Задач найдено: ${initial.items.length}`}
+      </p>
       {initial.items.length === 0 ? (
-        <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-          По этим фильтрам задач нет.
+        <div className="flex min-h-64 flex-col items-center justify-center rounded-2xl border bg-card px-6 py-12 text-center">
+          <h2 className="text-lg font-semibold tracking-tight">Задач пока нет</h2>
+          <p className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">Попробуйте изменить фильтры или вернитесь позже — новые задачи появятся здесь.</p>
+          {Object.values(filters).some(Boolean) && <Button variant="outline" className="mt-5 rounded-xl" onClick={() => startTransition(() => router.replace(pathname))}>Сбросить фильтры</Button>}
         </div>
       ) : (
         <div
@@ -106,11 +110,13 @@ export function CatalogView({ initial, filters }: Props) {
           {initial.items.map((task) => (
             <TaskTile
               key={task.id}
+              className="rounded-2xl border border-border p-5 shadow-none ring-0"
               task={task}
               actions={
                 // FR-4.8: откликнуться можно на задачу с любым рейтингом.
                 <Button
                   size="sm"
+                  className="h-10 w-full rounded-xl font-semibold"
                   onClick={() => {
                     router.push(`/task-match?task=${task.id}`);
                   }}
