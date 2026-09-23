@@ -19,11 +19,11 @@ const FIELD_NODES: Record<WorkspaceField, string[]> = {
 // The existing workspace renders nine groups. This adapter keeps its view usable
 // while task_fields remains the authoritative 17-node record.
 export function projectWorkspaceTask(task: TaskRow, rows: FieldRow[]): WorkspaceTask & { score: number } {
-  const byKey = new Map(rows.map((row) => [row.key, row]));
+  const byKey = new Map(rows.map((row) => [row.node, row]));
   const fields = {} as Record<WorkspaceField, string>;
   const confirmedFields: WorkspaceField[] = [];
   for (const [group, keys] of Object.entries(FIELD_NODES) as [WorkspaceField, string[]][]) {
-    fields[group] = keys.map((key) => byKey.get(key)?.value.trim()).filter(Boolean).join("\n");
+    fields[group] = keys.map((key) => byKey.get(key)?.value?.trim()).filter(Boolean).join("\n");
     if (keys.some((key) => byKey.get(key)?.state === "confirmed")) confirmedFields.push(group);
   }
   return {

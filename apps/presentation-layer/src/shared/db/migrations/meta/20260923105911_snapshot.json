@@ -1,11 +1,11 @@
 {
-  "id": "4906255b-0e16-47b9-81d0-eca8038c498d",
+  "id": "d02d0872-4405-4d26-badf-bad44c64f20f",
   "prevId": "1444c1a8-0c0b-4ef7-bd51-a74a75a7c71e",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.grill_sessions": {
-      "name": "grill_sessions",
+    "public.ai_logs": {
+      "name": "ai_logs",
       "schema": "",
       "columns": {
         "id": {
@@ -21,32 +21,197 @@
           "primaryKey": false,
           "notNull": true
         },
-        "current_node": {
-          "name": "current_node",
+        "turn_id": {
+          "name": "turn_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "agent": {
+          "name": "agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "model": {
+          "name": "model",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "status": {
-          "name": "status",
+        "prompt": {
+          "name": "prompt",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'active'"
+          "notNull": false
         },
-        "question_count": {
-          "name": "question_count",
+        "input": {
+          "name": "input",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "raw_output": {
+          "name": "raw_output",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parse_ok": {
+          "name": "parse_ok",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "retry_count": {
+          "name": "retry_count",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "default": 0
         },
-        "version": {
-          "name": "version",
-          "type": "integer",
+        "dropped": {
+          "name": "dropped",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": "'[]'::jsonb"
+        },
+        "latency_ms": {
+          "name": "latency_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error": {
+          "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fallback_used": {
+          "name": "fallback_used",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "fallback_reason": {
+          "name": "fallback_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "ai_logs_task_id_tasks_id_fk": {
+          "name": "ai_logs_task_id_tasks_id_fk",
+          "tableFrom": "ai_logs",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "task_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "ai_logs_turn_id_grill_turn_id_fk": {
+          "name": "ai_logs_turn_id_grill_turn_id_fk",
+          "tableFrom": "ai_logs",
+          "tableTo": "grill_turn",
+          "columnsFrom": [
+            "turn_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.criterion": {
+      "name": "criterion",
+      "schema": "",
+      "columns": {
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "metric": {
+          "name": "metric",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "threshold": {
+          "name": "threshold",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "threshold_has_number": {
+          "name": "threshold_has_number",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "how_to_check": {
+          "name": "how_to_check",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "grill_field_state",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'suggested'"
+        },
+        "source_quote": {
+          "name": "source_quote",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_turn_id": {
+          "name": "source_turn_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -65,9 +230,152 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "grill_sessions_task_id_tasks_id_fk": {
-          "name": "grill_sessions_task_id_tasks_id_fk",
-          "tableFrom": "grill_sessions",
+        "criterion_task_id_tasks_id_fk": {
+          "name": "criterion_task_id_tasks_id_fk",
+          "tableFrom": "criterion",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "task_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "criterion_source_turn_id_grill_turn_id_fk": {
+          "name": "criterion_source_turn_id_grill_turn_id_fk",
+          "tableFrom": "criterion",
+          "tableTo": "grill_turn",
+          "columnsFrom": [
+            "source_turn_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "criterion_pk": {
+          "name": "criterion_pk",
+          "columns": [
+            "task_id",
+            "position"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "criterion_position_range": {
+          "name": "criterion_position_range",
+          "value": "\"criterion\".\"position\" BETWEEN 1 AND 3"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.grill_session": {
+      "name": "grill_session",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "grill_session_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "current_node": {
+          "name": "current_node",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "current_block": {
+          "name": "current_block",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pushbacks": {
+          "name": "pushbacks",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "skipped_nodes": {
+          "name": "skipped_nodes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "questions_asked": {
+          "name": "questions_asked",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "tags_state": {
+          "name": "tags_state",
+          "type": "grill_tags_state",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'suggested'"
+        },
+        "draft_checkpoint_state": {
+          "name": "draft_checkpoint_state",
+          "type": "grill_draft_checkpoint_state",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "grill_session_task_id_tasks_id_fk": {
+          "name": "grill_session_task_id_tasks_id_fk",
+          "tableFrom": "grill_session",
           "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
@@ -80,30 +388,52 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "grill_session_task_id_unique": {
+          "name": "grill_session_task_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "task_id"
+          ]
+        }
+      },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "grill_session_questions_asked_nonnegative": {
+          "name": "grill_session_questions_asked_nonnegative",
+          "value": "\"grill_session\".\"questions_asked\" >= 0"
+        },
+        "grill_session_version_nonnegative": {
+          "name": "grill_session_version_nonnegative",
+          "value": "\"grill_session\".\"version\" >= 0"
+        }
+      },
       "isRLSEnabled": false
     },
-    "public.grill_turns": {
-      "name": "grill_turns",
+    "public.grill_turn": {
+      "name": "grill_turn",
       "schema": "",
       "columns": {
         "id": {
           "name": "id",
-          "type": "uuid",
+          "type": "serial",
           "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
+          "notNull": true
         },
         "session_id": {
           "name": "session_id",
-          "type": "uuid",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "node_key": {
-          "name": "node_key",
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "node": {
+          "name": "node",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -116,13 +446,33 @@
         },
         "options": {
           "name": "options",
-          "type": "jsonb",
+          "type": "text[]",
           "primaryKey": false,
           "notNull": true,
-          "default": "'[]'::jsonb"
+          "default": "'{}'"
+        },
+        "is_pushback": {
+          "name": "is_pushback",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "answer": {
           "name": "answer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "covered_nodes": {
+          "name": "covered_nodes",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'"
+        },
+        "specificity": {
+          "name": "specificity",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -144,10 +494,10 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "grill_turns_session_id_grill_sessions_id_fk": {
-          "name": "grill_turns_session_id_grill_sessions_id_fk",
-          "tableFrom": "grill_turns",
-          "tableTo": "grill_sessions",
+        "grill_turn_session_id_grill_session_id_fk": {
+          "name": "grill_turn_session_id_grill_session_id_fk",
+          "tableFrom": "grill_turn",
+          "tableTo": "grill_session",
           "columnsFrom": [
             "session_id"
           ],
@@ -159,9 +509,23 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "grill_turn_session_seq_unique": {
+          "name": "grill_turn_session_seq_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "session_id",
+            "seq"
+          ]
+        }
+      },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "grill_turn_seq_positive": {
+          "name": "grill_turn_seq_positive",
+          "value": "\"grill_turn\".\"seq\" > 0"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.proposal_stages": {
@@ -420,25 +784,18 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.task_fields": {
-      "name": "task_fields",
+    "public.task_field": {
+      "name": "task_field",
       "schema": "",
       "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
         "task_id": {
           "name": "task_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "key": {
-          "name": "key",
+        "node": {
+          "name": "node",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -447,15 +804,15 @@
           "name": "value",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": "''"
+          "notNull": false
         },
         "state": {
           "name": "state",
-          "type": "text",
+          "type": "grill_field_state",
+          "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
-          "default": "'empty'"
+          "default": "'suggested'"
         },
         "not_applicable": {
           "name": "not_applicable",
@@ -464,30 +821,43 @@
           "notNull": true,
           "default": false
         },
-        "source": {
-          "name": "source",
+        "na_note": {
+          "name": "na_note",
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "source": {
+          "name": "source",
+          "type": "grill_field_source",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
         },
         "source_quote": {
           "name": "source_quote",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "source_turn_id": {
           "name": "source_turn_id",
-          "type": "uuid",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
-        "revision": {
-          "name": "revision",
-          "type": "integer",
+        "confirmed_at": {
+          "name": "confirmed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": "now()"
         },
         "updated_at": {
           "name": "updated_at",
@@ -497,33 +867,11 @@
           "default": "now()"
         }
       },
-      "indexes": {
-        "task_fields_task_key_unique": {
-          "name": "task_fields_task_key_unique",
-          "columns": [
-            {
-              "expression": "task_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
-        "task_fields_task_id_tasks_id_fk": {
-          "name": "task_fields_task_id_tasks_id_fk",
-          "tableFrom": "task_fields",
+        "task_field_task_id_tasks_id_fk": {
+          "name": "task_field_task_id_tasks_id_fk",
+          "tableFrom": "task_field",
           "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
@@ -533,12 +881,38 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "task_field_source_turn_id_grill_turn_id_fk": {
+          "name": "task_field_source_turn_id_grill_turn_id_fk",
+          "tableFrom": "task_field",
+          "tableTo": "grill_turn",
+          "columnsFrom": [
+            "source_turn_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "task_field_pk": {
+          "name": "task_field_pk",
+          "columns": [
+            "task_id",
+            "node"
+          ]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "task_field_na_note_required": {
+          "name": "task_field_na_note_required",
+          "value": "NOT \"task_field\".\"not_applicable\" OR \"task_field\".\"na_note\" IS NOT NULL"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.tasks": {
@@ -683,7 +1057,49 @@
       "isRLSEnabled": false
     }
   },
-  "enums": {},
+  "enums": {
+    "public.grill_draft_checkpoint_state": {
+      "name": "grill_draft_checkpoint_state",
+      "schema": "public",
+      "values": [
+        "pending",
+        "confirmed"
+      ]
+    },
+    "public.grill_field_source": {
+      "name": "grill_field_source",
+      "schema": "public",
+      "values": [
+        "draft",
+        "turn",
+        "manual"
+      ]
+    },
+    "public.grill_field_state": {
+      "name": "grill_field_state",
+      "schema": "public",
+      "values": [
+        "suggested",
+        "confirmed"
+      ]
+    },
+    "public.grill_session_status": {
+      "name": "grill_session_status",
+      "schema": "public",
+      "values": [
+        "active",
+        "finished"
+      ]
+    },
+    "public.grill_tags_state": {
+      "name": "grill_tags_state",
+      "schema": "public",
+      "values": [
+        "suggested",
+        "confirmed"
+      ]
+    }
+  },
   "schemas": {},
   "sequences": {},
   "roles": {},

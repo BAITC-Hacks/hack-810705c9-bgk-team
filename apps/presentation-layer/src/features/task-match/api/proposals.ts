@@ -61,8 +61,8 @@ export async function decideProposal(proposalId: string, input: unknown) {
       decidedAt: new Date() }).where(and(eq(proposals.id, proposalId), eq(proposals.status, 'submitted'))).returning();
     if (!row) throw new ApiError(409, 'ALREADY_DECIDED', 'Решение уже принято');
     if (decision === 'select') {
-      const [criterion] = await tx.select().from(taskFields).where(and(eq(taskFields.taskId, row.taskId), eq(taskFields.key, 'criteria.items'))).limit(1);
-      const items = criterion?.state === 'confirmed' ? criterion.value.split(/\n|;/).map((item) => item.trim()).filter(Boolean).slice(0, 3) : [];
+      const [criterion] = await tx.select().from(taskFields).where(and(eq(taskFields.taskId, row.taskId), eq(taskFields.node, 'criteria.items'))).limit(1);
+      const items = criterion?.state === 'confirmed' ? (criterion.value ?? '').split(/\n|;/).map((item) => item.trim()).filter(Boolean).slice(0, 3) : [];
       await tx.insert(proposalStages).values((items.length ? items : ['Первый результат по задаче']).map((item) => ({ proposalId, criterion: item })));
     }
     return row;
@@ -76,7 +76,7 @@ export async function kickoff(proposalId: string) {
   const [task] = await db.select().from(tasks).where(eq(tasks.id, proposal.taskId)).limit(1);
   const fields = await db.select().from(taskFields).where(eq(taskFields.taskId, proposal.taskId));
   const card: Card = { fields: {}, engagement: task?.engagement as Card['engagement'] };
-  for (const field of fields) card.fields[field.key as NodeKey] = { value: field.value, state: field.state as 'empty' | 'suggested' | 'confirmed' };
+  for (const field of fields) card.fields[field.node as NodeKey] = { value: field.value ?? '', state: field.state as 'empty' | 'suggested' | 'confirmed' };
   return { proposal: projectProposal(proposal), packet: buildKickoffPacket(card), stages: await db.select().from(proposalStages).where(eq(proposalStages.proposalId, proposalId)) };
 }
 
