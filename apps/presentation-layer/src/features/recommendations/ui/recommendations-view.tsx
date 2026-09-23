@@ -43,9 +43,7 @@ export function RecommendationsView({ teamId, initial, view: initialView }: Prop
   };
 
   const respond = (item: RecommendationItem) => {
-    toast.info(`Отклик на «${item.task.title}»`, {
-      description: "Форма отклика — ADR-007",
-    });
+    router.push(`/task-match?task=${item.task.id}`);
   };
 
   const skip = async (item: RecommendationItem) => {

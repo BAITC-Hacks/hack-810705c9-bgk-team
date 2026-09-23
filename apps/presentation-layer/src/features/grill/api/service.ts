@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, sql } from 'drizzle-orm';
 import {
   applyClassification,
   editField,
@@ -12,7 +12,7 @@ import {
 } from '@/entities/grill/model';
 import { recalculateScore } from '@/features/task-card/api/recalculate-score';
 import { db } from '@/shared/db';
-import { criterion, grillSession, grillTurn, taskField } from '@/shared/db/schema';
+import { criterion, grillSession, grillTurn, taskField, tasks } from '@/shared/db/schema';
 import type {
   CreateGrillInput,
   EditGrillFieldInput,
@@ -142,13 +142,13 @@ async function storeFields(
         const howToCheck = value.howToCheck as string;
         await tx.insert(criterion).values({
           taskId, position: index + 1, metric, threshold,
-          thresholdHasNumber: Boolean(value.thresholdHasNumber), howToCheck,
-          state: field.state ?? 'suggested', sourceQuote: field.sourceQuote,
+          thresholdHasNumber: /\d/.test(threshold), howToCheck,
+          state: 'suggested', sourceQuote: field.sourceQuote,
           sourceTurnId: sourceTurnId ?? null,
         }).onConflictDoUpdate({
           target: [criterion.taskId, criterion.position],
-          set: { metric, threshold, thresholdHasNumber: Boolean(value.thresholdHasNumber), howToCheck,
-            state: field.state ?? 'suggested', sourceQuote: field.sourceQuote, sourceTurnId: sourceTurnId ?? null, updatedAt: new Date() },
+          set: { metric, threshold, thresholdHasNumber: /\d/.test(threshold), howToCheck,
+            state: 'suggested', sourceQuote: field.sourceQuote, sourceTurnId: sourceTurnId ?? null, updatedAt: new Date() },
         });
       }
       continue;
@@ -194,17 +194,18 @@ async function emitStep(tx: GrillTx, taskId: string, session: typeof grillSessio
   return { ...step, question, options: answerOptions };
 }
 
-async function guardedSession(tx: GrillTx, taskId: string, version: number) {
+async function guardedSession(tx: GrillTx, taskId: string, version: number, allowFinished = false) {
+  await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, taskId)).for('update');
   const [session] = await tx.select().from(grillSession).where(eq(grillSession.taskId, taskId)).limit(1);
   if (!session) throw new GrillApiError(404, 'GRILL_NOT_FOUND', 'Сессия прожарки не найдена.');
   if (session.version !== version) throw new GrillApiError(409, 'STALE_SESSION', 'Сессия уже изменилась. Обновите страницу и повторите действие.');
-  if (session.status !== 'active') throw new GrillApiError(409, 'SESSION_FINISHED', 'Сессия уже завершена.');
+  if (!allowFinished && session.status !== 'active') throw new GrillApiError(409, 'SESSION_FINISHED', 'Сессия уже завершена.');
   return session;
 }
 
 async function advanceVersion(tx: GrillTx, session: typeof grillSession.$inferSelect) {
   const [updated] = await tx.update(grillSession).set({ version: session.version + 1, updatedAt: new Date() })
-    .where(and(eq(grillSession.id, session.id), eq(grillSession.version, session.version), eq(grillSession.status, 'active')))
+    .where(and(eq(grillSession.id, session.id), eq(grillSession.version, session.version)))
     .returning();
   if (!updated) throw new GrillApiError(409, 'STALE_SESSION', 'Сессия уже изменилась. Обновите страницу и повторите действие.');
   return updated;
@@ -223,9 +224,9 @@ export async function getGrill(taskId: string) {
   });
 }
 
-export async function createGrill(taskId: string, input: CreateGrillInput) {
-  await requireTaskOwner(taskId);
-  return db.transaction(async (tx) => {
+export async function createGrill(taskId: string, input: CreateGrillInput, transaction?: GrillTx) {
+  if (!transaction) await requireTaskOwner(taskId);
+  const create = async (tx: GrillTx) => {
     const [existing] = await tx.select({ id: grillSession.id }).from(grillSession).where(eq(grillSession.taskId, taskId)).limit(1);
     if (existing) throw new GrillApiError(409, 'GRILL_EXISTS', 'Прожарка для этой задачи уже создана.');
     const [session] = await tx.insert(grillSession).values({ taskId, currentBlock: 'draft', draftCheckpointState: 'pending' }).returning();
@@ -235,7 +236,8 @@ export async function createGrill(taskId: string, input: CreateGrillInput) {
     }
     await storeFields(tx, taskId, proposed, 'draft');
     return { session: toState(session, []), fields: proposed, next: { kind: 'checkpoint', block: 'draft' } as const };
-  });
+  };
+  return transaction ? create(transaction) : db.transaction(create);
 }
 
 export async function submitTurn(taskId: string, input: SubmitGrillTurnInput) {
@@ -335,13 +337,14 @@ export async function checkpoint(taskId: string, input: GrillCheckpointInput) {
 
 export async function patchField(taskId: string, node: string, input: EditGrillFieldInput) {
   await requireTaskOwner(taskId);
+  if (!Object.hasOwn(nodeBlocks, node)) throw new GrillApiError(422, 'INVALID_NODE', 'Неизвестное поле');
   return db.transaction(async (tx) => {
-    const session = await guardedSession(tx, taskId, input.sessionVersion);
+    const session = await guardedSession(tx, taskId, input.sessionVersion, true);
     const [row] = await tx.select().from(taskField).where(and(eq(taskField.taskId, taskId), eq(taskField.node, node))).limit(1);
     const criteriaRows = node === 'criteria.items'
       ? await tx.select().from(criterion).where(eq(criterion.taskId, taskId)).orderBy(asc(criterion.position))
       : [];
-    if (!row && !criteriaRows.length) throw new GrillApiError(404, 'FIELD_NOT_FOUND', 'Поле карточки не найдено.');
+    if (!row && !criteriaRows.length && input.action === 'confirm') throw new GrillApiError(404, 'FIELD_NOT_FOUND', 'Поле карточки не найдено.');
     const updatedSession = await advanceVersion(tx, session);
     const old: GrillField = row
       ? { value: fieldValue(row.value), state: row.state, notApplicable: row.notApplicable, sourceQuote: row.sourceQuote }
@@ -354,6 +357,7 @@ export async function patchField(taskId: string, node: string, input: EditGrillF
       if (node === 'criteria.items') {
         if (!Array.isArray(edited.value)) throw new GrillApiError(422, 'INVALID_CRITERIA', 'Критерии должны быть списком структурированных значений.');
         const values = edited.value.slice(0, 3);
+        await tx.delete(criterion).where(and(eq(criterion.taskId, taskId), gt(criterion.position, values.length)));
         if (!values.length || values.some((item) => !item || typeof item !== 'object'
           || typeof (item as Record<string, unknown>).metric !== 'string'
           || typeof (item as Record<string, unknown>).threshold !== 'string'
@@ -366,21 +370,23 @@ export async function patchField(taskId: string, node: string, input: EditGrillF
           const threshold = value.threshold as string;
           const howToCheck = value.howToCheck as string;
           await tx.insert(criterion).values({ taskId, position: index + 1, metric, threshold,
-            thresholdHasNumber: Boolean(value.thresholdHasNumber), howToCheck, state: 'suggested',
+            thresholdHasNumber: /\d/.test(threshold), howToCheck, state: 'suggested',
           sourceQuote: displayValue(edited.value), sourceTurnId: null }).onConflictDoUpdate({
               target: [criterion.taskId, criterion.position], set: { metric, threshold,
-                thresholdHasNumber: Boolean(value.thresholdHasNumber), howToCheck, state: 'suggested',
+                thresholdHasNumber: /\d/.test(threshold), howToCheck, state: 'suggested',
                 sourceQuote: displayValue(edited.value), sourceTurnId: null, updatedAt: new Date() },
             });
         }
       } else {
-        await tx.update(taskField).set({ value: serialized(edited.value), state: 'suggested', source: 'manual', sourceQuote: displayValue(edited.value),
-          notApplicable: false, naNote: null, sourceTurnId: null, confirmedAt: null, updatedAt: new Date() })
-          .where(and(eq(taskField.taskId, taskId), eq(taskField.node, node)));
+        await storeFields(tx, taskId, { [node]: { value: edited.value, state: 'suggested', sourceQuote: displayValue(edited.value) } }, 'manual');
       }
     } else {
       if (node === 'criteria.items') await tx.update(criterion).set({ state: 'confirmed', updatedAt: new Date() }).where(eq(criterion.taskId, taskId));
       else await tx.update(taskField).set({ state: 'confirmed', confirmedAt: new Date(), updatedAt: new Date() }).where(and(eq(taskField.taskId, taskId), eq(taskField.node, node)));
+    }
+    if (node === 'criteria.items' && input.action === 'edit') {
+      const [task] = await tx.update(tasks).set({ criteriaVersion: sql`${tasks.criteriaVersion} + 1` }).where(eq(tasks.id, taskId)).returning();
+      await tx.update(criterion).set({ version: task.criteriaVersion }).where(eq(criterion.taskId, taskId));
     }
     await recalculateScore(tx, taskId, 'task');
     return { fields: await readFields(tx, taskId), sessionVersion: updatedSession.version };

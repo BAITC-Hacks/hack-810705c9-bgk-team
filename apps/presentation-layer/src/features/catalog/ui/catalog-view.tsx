@@ -3,7 +3,7 @@
 import { useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ArrowRight } from "lucide-react";
-import { toast } from "sonner";
+
 import { LEVEL_LABELS } from "@/entities/task/model/level";
 import { ENGAGEMENT_LABELS, TaskTile } from "@/entities/task/ui/task-tile";
 import { ROLE_LABELS } from "@/entities/team/model/types";
@@ -111,11 +111,9 @@ export function CatalogView({ initial, filters }: Props) {
                 // FR-4.8: откликнуться можно на задачу с любым рейтингом.
                 <Button
                   size="sm"
-                  onClick={() =>
-                    toast.info(`Отклик на «${task.title}»`, {
-                      description: "Форма отклика — ADR-007",
-                    })
-                  }
+                  onClick={() => {
+                    router.push(`/task-match?task=${task.id}`);
+                  }}
                 >
                   Откликнуться <ArrowRight data-icon="inline-end" />
                 </Button>

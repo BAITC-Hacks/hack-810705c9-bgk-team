@@ -2,6 +2,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { taskAccess, toExecutorView, visibleProposals } from '@/entities/access';
 import { requireTaskOwner } from '@/features/task-card/api/access';
+import { recalculateScore } from '@/features/task-card/api/recalculate-score';
 import { getDemoActor } from '@/shared/api/actor';
 import { db } from '@/shared/db';
 import { aiLogs, grillSessions, grillTurns, taskFields, tasks } from '@/shared/db/schema';
@@ -22,6 +23,8 @@ const patchSchema = z.object({
   }).optional(),
   title: z.string().optional(), company: z.string().optional(), topic: z.string().optional(),
   engagement: z.enum(['paid', 'practice', 'both']).optional(),
+  neededRoles: z.array(z.string()).optional(), neededSkills: z.array(z.string()).optional(),
+  tagsState: z.enum(['suggested','confirmed']).optional(), compensationNote: z.string().optional(),
   fields: z.record(z.string(), z.string()).optional(),
   confirmedFields: z.array(z.string()).optional(),
   status: z.enum(['draft', 'published']).optional(),
@@ -89,9 +92,12 @@ export async function createTask(input: unknown) {
   const { description } = descriptionSchema.parse(input);
   const analyzed = await analyzeText({ text: description, targetNodes: Object.values(workspaceNodes).flat(), dictionary: { roles: [], skills: [] } });
   const draftFields = Object.fromEntries((analyzed?.fields ?? []).filter(f => isNode(f.node)).map(f => [f.node, { value: f.value, sourceQuote: f.source_quote }]));
-  const [row] = await db.insert(tasks).values({ businessId: actor.businessId, title: description.split(/[\n.!?]/, 1)[0].slice(0,68), description }).returning();
-  await createGrill(row.id, { draftText: description, draftFields });
-  await db.insert(aiLogs).values({ taskId: row.id, kind: 'analyze-text', agent: analyzed?.log.agent ?? 'fallback', input: { text: description }, parseOk: Boolean(analyzed), fallbackUsed: !analyzed });
+  const row = await db.transaction(async tx => {
+    const [row] = await tx.insert(tasks).values({ businessId: actor.businessId, title: description.split(/[\n.!?]/, 1)[0].slice(0,68), description }).returning();
+    await createGrill(row.id, { draftText: description, draftFields }, tx);
+    await tx.insert(aiLogs).values({ taskId: row.id, kind: 'analyze-text', agent: analyzed?.log.agent ?? 'fallback', input: { text: description }, parseOk: Boolean(analyzed), fallbackUsed: !analyzed });
+    return row;
+  });
   return { ...await response(row.id), fallbackUsed: !analyzed };
 }
 
@@ -116,9 +122,16 @@ export async function updateTask(taskId: string, input: unknown) {
   const patch = parsed.task ?? parsed;
   const [row] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1);
   if (!row) throw new ApiError(404, 'NOT_FOUND', 'Задача не найдена');
-  await db.update(tasks).set({ title: patch.title ?? row.title, company: patch.company ?? row.company,
+  await db.transaction(async tx => {
+  await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, taskId)).for('update');
+  await tx.update(tasks).set({
+    engagement: parsed.engagement ?? row.engagement, neededRoles: parsed.neededRoles ?? row.neededRoles, neededSkills: parsed.neededSkills ?? row.neededSkills,
+    tagsState: parsed.tagsState ?? (parsed.neededRoles || parsed.neededSkills ? 'suggested' : row.tagsState), compensationNote: parsed.compensationNote ?? row.compensationNote,
+    title: patch.title ?? row.title, company: patch.company ?? row.company,
     topic: ('industry' in patch ? patch.industry : undefined) ?? ('topic' in patch ? patch.topic : undefined) ?? row.topic,
     updatedAt: new Date() }).where(eq(tasks.id, taskId));
+  await recalculateScore(tx, taskId, 'task');
+  });
   for (const [key, value] of Object.entries(patch.fields ?? {})) {
     const node = workspaceToNode[key] ?? (isNode(key) ? key : null);
     if (!node) continue;
