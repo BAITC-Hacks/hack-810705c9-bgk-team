@@ -2,12 +2,12 @@ import {
   calculateScore,
   readiness,
   scoreBreakdown,
-  suggestQuestions,
   TASK_FIELDS,
   type Proposal,
   type Task,
   type Team,
 } from "@/entities/workspace";
+import { analyzeTaskLocally } from "./local-ai-analysis";
 
 export const CHAT_SKILLS = [
   {
@@ -76,11 +76,8 @@ export function runChatSkill(
 
   switch (skill) {
     case "clarify": {
-      const questions = suggestQuestions(task);
-      const pending = TASK_FIELDS.filter(
-        ({ key }) =>
-          task.fields[key].trim() && !task.confirmedFields.includes(key),
-      );
+      const { questions, pendingConfirmation } = analyzeTaskLocally(task).output;
+      const pending = TASK_FIELDS.filter(({ key }) => pendingConfirmation.includes(key));
       return (
         request +
         (questions.length
@@ -99,7 +96,11 @@ export function runChatSkill(
               "",
               "Выберите вопрос над перепиской, чтобы записать ответ в соответствующее поле. Затем проверьте и подтвердите карточку.",
             ].join("\n")
-          : "Все поля карточки заполнены и подтверждены. Можно открыть отклики и сравнить предложения команд. Если условия изменились, сначала отредактируйте карточку.")
+          : pending.length
+            ? `Все ответы уже внесены. Нужно проверить и подтвердить: ${pending.map(({ label }) => label.toLocaleLowerCase("ru")).join(", ")}. Откройте карточку — повторно отвечать на эти вопросы не нужно. До подтверждения эти поля не добавляют баллы.`
+            : task.status === "draft"
+              ? "Все поля карточки заполнены и подтверждены. Откройте карточку и опубликуйте задачу, чтобы студенты могли откликнуться."
+              : "Все поля карточки заполнены и подтверждены. Можно открыть отклики и сравнить предложения команд. Если условия изменились, сначала отредактируйте карточку.")
       );
     }
     case "readiness": {

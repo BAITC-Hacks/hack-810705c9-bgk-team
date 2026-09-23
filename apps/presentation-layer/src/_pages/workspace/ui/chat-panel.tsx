@@ -10,8 +10,6 @@ import {
   Xmark,
 } from "@gravity-ui/icons";
 import {
-  calculateScore,
-  suggestQuestions,
   TASK_FIELDS,
   type Message,
   type Task,
@@ -23,6 +21,14 @@ import {
   ConversationScrollButton,
 } from "@/shared/components/ai-elements/conversation";
 import { Button } from "@/shared/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/shared/components/ui/dialog";
 import { cn } from "@/shared/lib/utils";
 import {
   CHAT_SKILLS,
@@ -30,11 +36,13 @@ import {
   removeMention,
   type ChatSkillId,
 } from "./chat-skills";
+import { analyzeTaskLocally } from "./local-ai-analysis";
+import { useAsyncAction } from "@/shared/hooks/use-async-action";
 
 type Props = {
   task: Task;
   messages: Message[];
-  onSend: (text: string, field?: TaskField, skill?: ChatSkillId) => void;
+  onSend: (text: string, field?: TaskField, skill?: ChatSkillId) => void | Promise<void>;
   onEdit: () => void;
   onShowProposals: () => void;
   onShowShortcuts: () => void;
@@ -69,16 +77,21 @@ export function ChatPanel({
   onShowShortcuts,
 }: Props) {
   const [input, setInput] = useState("");
+  const { pending, error, run } = useAsyncAction();
   const [answerField, setAnswerField] = useState<TaskField | undefined>();
   const [selectedSkill, setSelectedSkill] = useState<ChatSkillId | undefined>();
   const [menuMode, setMenuMode] = useState<"mention" | "manual" | null>(null);
   const [caret, setCaret] = useState(0);
   const [activeOption, setActiveOption] = useState(0);
+  const [simulateMalformed, setSimulateMalformed] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const composerRef = useRef<HTMLFormElement>(null);
   const menuId = useId();
-  const questions = suggestQuestions(task);
-  const score = calculateScore(task);
+  const analysis = analyzeTaskLocally(task);
+  const { questions, pendingConfirmation } = analysis.output;
+  const displayedAnalysis = simulateMalformed
+    ? analyzeTaskLocally(task, '{"questions": [')
+    : analysis;
   const field = TASK_FIELDS.find((item) => item.key === answerField);
   const skill = CHAT_SKILLS.find((item) => item.id === selectedSkill);
   const mention = getMentionRange(input, caret);
@@ -116,6 +129,7 @@ export function ChatPanel({
   }, [activeOptionId, menuOpen]);
 
   function pickOption(option: ChatOption) {
+    if (pending) return;
     const updatedInput =
       mention && menuMode === "mention" ? removeMention(input, mention) : input;
     const nextCaret = mention && menuMode === "mention" ? mention.start : caret;
@@ -135,19 +149,19 @@ export function ChatPanel({
     });
   }
 
-  function send() {
+  async function send() {
     if (!input.trim() && !selectedSkill) return;
-    onSend(
+    if (!await run(() => onSend(
       input.trim(),
       selectedSkill ? undefined : answerField,
       selectedSkill,
-    );
+    ))) return;
     setInput("");
     setAnswerField(undefined);
     setSelectedSkill(undefined);
     setMenuMode(null);
     setCaret(0);
-    inputRef.current?.focus();
+    requestAnimationFrame(() => inputRef.current?.focus());
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -168,14 +182,48 @@ export function ChatPanel({
             <div className="min-w-0 flex-1">
               <div className="mb-3 flex items-center gap-2">
                 <span className="text-[15px] font-bold">AI-Sana</span>
-                <span className="text-xs text-muted-foreground">
-                  Демо-ассистент
-                </span>
+                <Dialog onOpenChange={(open) => { if (!open) setSimulateMalformed(false); }}>
+                  <DialogTrigger asChild>
+                    <button type="button" className="rounded text-xs text-muted-foreground underline decoration-dotted underline-offset-4 hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary">
+                      Демо-ассистент
+                    </button>
+                  </DialogTrigger>
+                  <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
+                    <DialogHeader className="pr-7">
+                      <DialogTitle className="font-semibold">Локальный демо-ассистент</DialogTitle>
+                      <DialogDescription>
+                        Ответ формируется по шаблону и проверяется перед показом. Внешняя модель не вызывается. Здесь можно проверить формат и обработку ошибки.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted p-3">
+                      <p role="status" className="text-sm font-medium">
+                        {displayedAnalysis.fallbackUsed ? "Ошибка обработана · использованы безопасные вопросы" : "Ответ проверен · шаблон выполнен"}
+                      </p>
+                      <Button type="button" size="sm" variant="outline" onClick={() => setSimulateMalformed((value) => !value)}>
+                        {simulateMalformed ? "Вернуть корректный ответ" : "Показать обработку ошибки"}
+                      </Button>
+                    </div>
+                    {displayedAnalysis.error && (
+                      <p className="text-sm text-muted-foreground">{displayedAnalysis.error} Продолжаем со стандартными вопросами; карточка и ответы сохранены.</p>
+                    )}
+                    <AiContractDetails label="Промпт" value={displayedAnalysis.prompt} />
+                    <AiContractDetails label="Вход · JSON" value={JSON.stringify(displayedAnalysis.input, null, 2)} />
+                    <AiContractDetails label="Исходный ответ · JSON" value={displayedAnalysis.rawOutput} />
+                    <AiContractDetails label="Проверенный результат и статус" value={JSON.stringify({ output: displayedAnalysis.output, parse_ok: displayedAnalysis.parseOk, fallback_used: displayedAnalysis.fallbackUsed }, null, 2)} />
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      При неверном JSON, неизвестных полях или повторных вопросах ответ заменяется локальным шаблоном. Заполненные поля ждут подтверждения человека, а рейтинг и выбор команд остаются в интерфейсе.
+                    </p>
+                  </DialogContent>
+                </Dialog>
               </div>
               <p className="text-[15px] leading-[1.7]">
-                {score === 100
-                  ? "Всё важное уже в карточке. Можно перейти к предложениям команд или уточнить детали задачи."
-                  : "Выберите вопрос, чтобы дополнить карточку задачи."}
+                {questions.length
+                  ? "Выберите вопрос, чтобы дополнить карточку задачи."
+                  : pendingConfirmation.length
+                    ? "Все ответы уже в карточке. Проверьте и подтвердите их, чтобы обновить готовность задачи."
+                    : task.status === "draft"
+                      ? "Карточка заполнена и подтверждена. Осталось опубликовать задачу для студентов."
+                      : "Всё важное уже в карточке. Можно перейти к предложениям команд или уточнить детали задачи."}
               </p>
               {questions.length > 0 && (
                 <>
@@ -184,6 +232,7 @@ export function ChatPanel({
                       <button
                         type="button"
                         key={question.field}
+                        disabled={pending}
                         aria-pressed={answerField === question.field}
                         onClick={() => {
                           setAnswerField(question.field);
@@ -208,6 +257,15 @@ export function ChatPanel({
                     ))}
                   </div>
                 </>
+              )}
+              {questions.length === 0 ? (
+                <Button type="button" variant="outline" size="sm" className="mt-4" onClick={pendingConfirmation.length || task.status === "draft" ? onEdit : onShowProposals}>
+                  {pendingConfirmation.length ? "Проверить и подтвердить ответы" : task.status === "draft" ? "Опубликовать карточку" : "Открыть отклики"}
+                </Button>
+              ) : pendingConfirmation.length > 0 && (
+                <button type="button" onClick={onEdit} className="mt-3 rounded text-xs font-medium text-muted-foreground underline underline-offset-4 hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary">
+                  Проверить внесённые ответы · {pendingConfirmation.length}
+                </button>
               )}
             </div>
           </div>
@@ -235,6 +293,7 @@ export function ChatPanel({
         <ConversationScrollButton aria-label="К последнему сообщению" />
       </Conversation>
       <div className="mx-auto w-full max-w-[960px] shrink-0 px-4 pt-3 pb-3 lg:px-9">
+        {error && <p id="chat-save-error" role="alert" className="mb-2 text-sm text-destructive">{error}</p>}
         <form
           ref={composerRef}
           onBlur={(event) => {
@@ -268,6 +327,7 @@ export function ChatPanel({
                     <button
                       type="button"
                       key={option.id}
+                      disabled={pending}
                       id={`${menuId}-${option.id}`}
                       role="option"
                       aria-selected={activeIndex === index}
@@ -321,6 +381,7 @@ export function ChatPanel({
               <button
                 type="button"
                 aria-label={`Убрать навык: ${skill.label}`}
+                disabled={pending}
                 onClick={() => {
                   setSelectedSkill(undefined);
                   inputRef.current?.focus();
@@ -338,6 +399,7 @@ export function ChatPanel({
                 type="button"
                 onClick={() => setAnswerField(undefined)}
                 aria-label="Отменить выбор вопроса"
+                disabled={pending}
                 className="flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-workspace-selected focus-visible:outline-2 focus-visible:outline-primary"
               >
                 <Xmark className="size-3" />
@@ -348,6 +410,7 @@ export function ChatPanel({
             {field ? `Ответ: ${field.label}` : "Сообщение ассистенту"}
           </label>
           <textarea
+            disabled={pending}
             id="chat-message"
             ref={inputRef}
             value={input}
@@ -356,6 +419,7 @@ export function ChatPanel({
             aria-expanded={menuOpen}
             aria-controls={menuOpen ? menuId : undefined}
             aria-activedescendant={menuOpen ? activeOptionId : undefined}
+            aria-describedby={error ? "chat-save-error" : undefined}
             onChange={(event) => {
               const value = event.target.value;
               const position = event.target.selectionStart;
@@ -421,6 +485,7 @@ export function ChatPanel({
                 variant="ghost"
                 size="icon"
                 aria-label="Навыки и действия"
+                disabled={pending}
                 title="Навыки и действия (@)"
                 aria-haspopup="listbox"
                 aria-expanded={menuOpen}
@@ -464,7 +529,7 @@ export function ChatPanel({
                 size="icon"
                 type="submit"
                 aria-label="Отправить сообщение"
-                disabled={!input.trim() && !selectedSkill}
+                disabled={pending || (!input.trim() && !selectedSkill)}
                 className="size-9 rounded-full disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
               >
                 <ArrowUp className="size-[18px]" />
@@ -477,5 +542,14 @@ export function ChatPanel({
         </p>
       </div>
     </div>
+  );
+}
+
+function AiContractDetails({ label, value }: { label: string; value: string }) {
+  return (
+    <details className="rounded-lg border px-3 py-2.5">
+      <summary className="cursor-pointer text-sm font-semibold">{label}</summary>
+      <pre className="mt-3 max-h-64 overflow-y-auto rounded-md bg-muted p-3 text-xs leading-relaxed whitespace-pre-wrap break-words">{value}</pre>
+    </details>
   );
 }

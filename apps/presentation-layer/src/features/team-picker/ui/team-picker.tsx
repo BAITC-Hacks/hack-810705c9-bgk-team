@@ -30,12 +30,13 @@ import {
 import { Textarea } from "@/shared/components/ui/textarea";
 import { cn } from "@/shared/lib/utils";
 import { shouldHandleShortcut } from "@/shared/lib/keyboard-shortcuts";
+import { useAsyncAction } from "@/shared/hooks/use-async-action";
 
 export type TeamPickerProps = {
   teams: Team[];
   activeTeamId: string;
-  onTeamChange: (id: string) => void;
-  onTeamSave: (team: Team) => void;
+  onTeamChange: (id: string) => void | Promise<void>;
+  onTeamSave: (team: Team) => void | Promise<void>;
   points: number;
 };
 
@@ -104,6 +105,7 @@ export function TeamPicker({
   const [mode, setMode] = useState<"browse" | "create" | "edit">("browse");
   const [draft, setDraft] = useState<TeamDraft>(EMPTY_DRAFT);
   const [error, setError] = useState("");
+  const { pending, error: saveError, run } = useAsyncAction();
   const trigger = useRef<HTMLButtonElement | null>(null);
   const dialogContent = useRef<HTMLDivElement | null>(null);
   const id = useId();
@@ -113,6 +115,7 @@ export function TeamPicker({
   const isActive = selectedTeam?.id === activeTeamId;
 
   function changeOpen(next: boolean) {
+    if (pending) return;
     if (next) {
       setSelectedId(activeTeamId);
       setMode("browse");
@@ -159,7 +162,7 @@ export function TeamPicker({
     setError("");
   }
 
-  function saveTeam(event: FormEvent<HTMLFormElement>) {
+  async function saveTeam(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const name = draft.name.trim();
     const members = Number(draft.members);
@@ -195,7 +198,7 @@ export function TeamPicker({
       interests,
       color: "#eeeeee",
     };
-    onTeamSave(team);
+    if (!await run(() => onTeamSave(team))) return;
     setOpen(false);
   }
 
@@ -253,6 +256,7 @@ export function TeamPicker({
               : "Этот профиль будет виден бизнесу вместе с вашими откликами."}
           </DialogDescription>
         </DialogHeader>
+        {saveError && <p role="alert" className="text-sm text-destructive">{saveError}</p>}
 
         {mode === "browse" ? (
           <>
@@ -323,9 +327,9 @@ export function TeamPicker({
                     ) : (
                       <Button
                         className="h-10 font-semibold"
-                        onClick={() => {
-                          onTeamChange(selectedTeam.id);
-                          setOpen(false);
+                        disabled={pending}
+                        onClick={async () => {
+                          if (await run(() => onTeamChange(selectedTeam.id))) setOpen(false);
                         }}
                       >
                         Выбрать команду
@@ -354,6 +358,7 @@ export function TeamPicker({
           </>
         ) : (
           <form onSubmit={saveTeam} className="space-y-4" noValidate>
+            <fieldset disabled={pending} className="contents">
             <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
               <div className="space-y-1.5">
                 <label htmlFor={`${id}-name`} className="text-sm font-semibold">
@@ -474,6 +479,7 @@ export function TeamPicker({
                   : "Сохранить изменения"}
               </Button>
             </div>
+            </fieldset>
           </form>
         )}
       </DialogContent>

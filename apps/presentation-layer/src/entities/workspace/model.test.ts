@@ -5,10 +5,12 @@ import { getDemoData } from "./demo-data";
 import {
   TASK_FIELDS,
   calculateScore,
+  confirmMilestone,
   createTask,
   readiness,
   scoreBreakdown,
   suggestQuestions,
+  submitMilestone,
   type Task,
 } from "./model";
 
@@ -62,15 +64,20 @@ describe("готовность задачи", () => {
     assert.equal(readiness(100).tone, "violet");
   });
 
-  it("предлагает максимум три вопроса только о неподтверждённых пунктах", () => {
-    const task = completeTask();
-    task.confirmedFields = ["context", "need", "users", "outcome"];
+  it("предлагает три вопроса и переходит к следующим после ответа без повторов", () => {
+    const task = createTask("Нужно снизить списания");
     const questions = suggestQuestions(task);
     assert.equal(questions.length, 3);
+    assert.deepEqual(questions.map(({ field }) => field), ["data", "outcome", "success"]);
+    for (const { field } of questions) task.fields[field] = "Ответ бизнеса";
     assert.ok(
-      questions.every(({ field }) => !task.confirmedFields.includes(field)),
+      suggestQuestions(task).every(({ field }) => !questions.some((item) => item.field === field)),
     );
+    assert.equal(calculateScore(task), 0);
     assert.equal(suggestQuestions(completeTask()).length, 0);
+    const unconfirmed = completeTask();
+    unconfirmed.confirmedFields = [];
+    assert.equal(suggestQuestions(unconfirmed).length, 0);
   });
 
   it("создаёт независимые черновики и не выдаёт исходный текст за подтверждение", () => {
@@ -82,6 +89,91 @@ describe("готовность задачи", () => {
     assert.equal(calculateScore(first), 0);
     first.fields.data = "Изменённое поле";
     assert.equal(second.fields.data, "");
+  });
+});
+
+describe("подтверждённый прогресс команды", () => {
+  const submission = {
+    title: "Прототип прогноза",
+    resultUrl: "https://example.com/demo/result",
+    comment: "Проверено на предоставленной таблице, результаты приведены по ссылке.",
+  };
+
+  it("принимает результат только выбранной команды и не начисляет баллы за отправку", () => {
+    const proposal = getDemoData().proposals[0];
+    assert.equal(submitMilestone(proposal, submission), proposal);
+    const selected = { ...proposal, status: "selected" as const };
+    assert.equal(confirmMilestone(selected), selected);
+    const submitted = submitMilestone(selected, submission);
+    assert.deepEqual(submitted.milestone, submission);
+    assert.equal(submitted.milestoneConfirmed, false);
+    const confirmed = confirmMilestone(submitted);
+    assert.equal(confirmed.milestoneConfirmed, true);
+    assert.equal(confirmMilestone(confirmed), confirmed);
+    assert.equal(submitMilestone(confirmed, { ...submission, title: "Другой этап" }), confirmed);
+  });
+
+  it("не принимает пустой результат и опасные ссылки", () => {
+    const proposal = { ...getDemoData().proposals[0], status: "selected" as const };
+    for (const invalid of [
+      { ...submission, title: " " },
+      { ...submission, comment: " " },
+      { ...submission, resultUrl: "javascript:alert(1)" },
+      { ...submission, resultUrl: "not-a-url" },
+    ]) assert.equal(submitMilestone(proposal, invalid), proposal);
+  });
+
+  it("позволяет исправить результат до подтверждения без начисления баллов", () => {
+    const selected = { ...getDemoData().proposals[0], status: "selected" as const };
+    const submitted = submitMilestone(selected, submission);
+    const edited = submitMilestone(submitted, {
+      title: "  Уточнённый прототип  ",
+      resultUrl: "  https://example.com/demo/revised  ",
+      comment: "  Исправлены расчёты и добавлены результаты проверки.  ",
+    });
+
+    assert.equal(edited.id, submitted.id);
+    assert.equal(edited.status, "selected");
+    assert.equal(edited.milestoneConfirmed, false);
+    assert.deepEqual(edited.milestone, {
+      title: "Уточнённый прототип",
+      resultUrl: "https://example.com/demo/revised",
+      comment: "Исправлены расчёты и добавлены результаты проверки.",
+    });
+    assert.deepEqual(submitted.milestone, submission);
+  });
+
+  it("не подтверждает сданный этап после отклонения или отмены выбора команды", () => {
+    const selected = { ...getDemoData().proposals[0], status: "selected" as const };
+    const submitted = submitMilestone(selected, submission);
+
+    for (const status of ["rejected", "pending"] as const) {
+      const noLongerSelected = { ...submitted, status };
+      assert.equal(confirmMilestone(noLongerSelected), noLongerSelected);
+      assert.equal(noLongerSelected.milestoneConfirmed, false);
+      assert.deepEqual(noLongerSelected.milestone, submission);
+      assert.equal(
+        submitMilestone(noLongerSelected, { ...submission, title: "Новый результат" }),
+        noLongerSelected,
+      );
+    }
+  });
+
+  it("не подтверждает этап повторно после отмены решения и повторного выбора", () => {
+    const selected = { ...getDemoData().proposals[0], status: "selected" as const };
+    const confirmed = confirmMilestone(submitMilestone(selected, submission));
+    const decisionUndone = { ...confirmed, status: "pending" as const };
+    const selectedAgain = { ...decisionUndone, status: "selected" as const };
+
+    assert.equal(decisionUndone.milestoneConfirmed, true);
+    assert.equal(confirmMilestone(decisionUndone), decisionUndone);
+    assert.equal(confirmMilestone(selectedAgain), selectedAgain);
+    assert.equal(selectedAgain.milestoneConfirmed, true);
+    assert.deepEqual(selectedAgain.milestone, submission);
+    assert.equal(
+      submitMilestone(selectedAgain, { ...submission, title: "Другой этап" }),
+      selectedAgain,
+    );
   });
 });
 
