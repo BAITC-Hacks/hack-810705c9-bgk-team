@@ -63,6 +63,9 @@ export const translateStep = createStep({
         structuredOutput: { schema: Translations },
       },
     );
-    return { package: inputData.package, translations: res.object.translations };
+    return {
+      package: inputData.package,
+      translations: res.object.translations,
+    };
   },
 });

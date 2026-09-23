@@ -1,6 +1,47 @@
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+
 import { Agent } from '@mastra/core/agent';
 
 import { sessionMemory } from '../memory';
+
+const SKILL_NAMES = [
+  'grill-me-smart',
+  'grill-me-user-story',
+  'grill-me-job-story',
+  'grill-me-acceptance-criteria',
+] as const;
+
+/**
+ * Единая папка скиллов — apps/ai-logic-layer/skills/<name>/SKILL.md
+ * (каноничный формат Agent Skills / LocalSkillSource Mastra).
+ *
+ * Пути резолвим в абсолютные walk-up поиском, потому что `mastra dev`
+ * запускает сервер-процесс с cwd=src/mastra/public, а прод-запуск (docker) —
+ * с cwd=/app: первый найденный каталог с skills/grill-me-smart/SKILL.md
+ * и есть корень приложения в любом из этих режимов.
+ */
+function resolveSkillsDir(): string {
+  const anchors = [process.cwd(), import.meta.dirname];
+  for (const anchor of anchors) {
+    let dir = anchor;
+    for (let i = 0; i < 7; i++) {
+      const candidate = path.join(dir, 'skills');
+      if (existsSync(path.join(candidate, 'grill-me-smart', 'SKILL.md'))) {
+        return candidate;
+      }
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  throw new Error(
+    `grill-me skills not found: expected skills/grill-me-smart/SKILL.md walking up from ` +
+      `cwd=${process.cwd()} and import.meta=${import.meta.dirname}`,
+  );
+}
+
+export const SKILLS_DIR = resolveSkillsDir();
 
 /**
  * Интервьюирующий агент Стека №1 «Результат и Контроль».
@@ -37,12 +78,7 @@ You hold four skills. The active step prompt names exactly which one to use for 
 - phase="commit": frontier empty AND the skill's exit conditions hold → artifact in the required shape, frontierEmpty=true, questions=[].
 Never claim commit while any exit test would fail a stranger's check.`,
   memory: sessionMemory,
-  // Нативные filesystem-скиллы Mastra (LocalSkillSource): единая папка
-  // apps/ai-logic-layer/skills/<name>/SKILL.md — путь относительно cwd приложения.
-  skills: [
-    './skills/grill-me-smart',
-    './skills/grill-me-user-story',
-    './skills/grill-me-job-story',
-    './skills/grill-me-acceptance-criteria',
-  ],
+  // Нативные filesystem-скиллы Mastra (LocalSkillSource) из единой папки
+  // apps/ai-logic-layer/skills/<name>/SKILL.md (абсолютные пути — см. SKILLS_DIR).
+  skills: SKILL_NAMES.map(name => path.join(SKILLS_DIR, name)),
 });

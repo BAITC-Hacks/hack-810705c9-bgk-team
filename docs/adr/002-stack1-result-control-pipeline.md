@@ -55,9 +55,10 @@ AI живёт только в `ai-logic-layer` (Mastra, `mastra_db`), UI зов�
   и дослать ответы через `run.resume()`.
 - (+) Exit-отчёты всех стадий попадают в финальный пакет — «Результат и
   Контроль» виден заказчику, расхождения US↔JS фиксируются в `disagreements`.
-- (−) Нативные path-скиллы резолвятся относительно cwd приложения — запускать
-  нужно из корня `apps/ai-logic-layer`; для Docker это покрыто COPY `./skills`
-  и `WORKDIR /app`.
+- (−) `mastra dev` запускает сервер с cwd `src/mastra/public` (а docker/prod — с
+  корня приложения), поэтому пути к скиллам резолвятся walk-up поиском до
+  каталога со `skills/grill-me-smart/SKILL.md`; COPY `./skills` в Dockerfile
+  сохраняет работоспособность в проде.
 - (−) Живой прогон (LLM + suspend в PG) требует `OPENAI_API_KEY` и поднятого
   `mastra_db`; без ключа проверяется только boot/типизация.
 - (−) Потолок `MAX_ROUNDS` при слишком широкой идее помечает стадию
