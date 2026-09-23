@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   ArrowUpRight,
   Asterisk,
@@ -16,10 +16,10 @@ import {
 import { toast } from "sonner";
 import {
   calculateScore,
-  createTask,
   getDemoData,
   TASK_FIELDS,
   type Message,
+  type Proposal,
   type Role,
   type Task,
   type TaskField,
@@ -69,6 +69,8 @@ export default function WorkspacePage() {
     {},
   );
   const [taskDrafts, setTaskDrafts] = useState<Record<string, Task>>({});
+  const [persistedIds, setPersistedIds] = useState<string[]>([]);
+  const [serverQuestions, setServerQuestions] = useState<Record<string, { field: TaskField; question: string }>>({});
   const [resetGeneration, setResetGeneration] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
   const [showDemo, setShowDemo] = useState(false);
@@ -80,6 +82,33 @@ export default function WorkspacePage() {
     getCompact,
     getServerCompact,
   );
+  useEffect(() => {
+    let active = true;
+    fetch("/api/tasks")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Не удалось загрузить задачи");
+        return response.json() as Promise<{
+          tasks: Task[];
+          questions: Record<string, { field: TaskField; question: string }>;
+          proposals: Proposal[];
+        }>;
+      })
+      .then(({ tasks, questions, proposals }) => {
+        if (!active) return;
+        setPersistedIds(tasks.map((item) => item.id));
+        setServerQuestions(questions ?? {});
+        if (tasks[0]) setSelectedId(tasks[0].id);
+        setData((current) => ({
+          ...current,
+          tasks: [...tasks, ...current.tasks.filter((item) => !tasks.some((saved) => saved.id === item.id))],
+          proposals: [...(proposals ?? []), ...current.proposals.filter((item) => !tasks.some((task) => task.id === item.taskId))],
+        }));
+      })
+      .catch(() => {
+        // The bundled fictional tasks remain available when the local database is offline.
+      });
+    return () => { active = false; };
+  }, []);
   const canonicalTask =
     data.tasks.find((item) => item.id === selectedId) ?? data.tasks[0];
   const hasDraftEdits = role === "business" && !!taskDrafts[canonicalTask.id];
@@ -114,7 +143,30 @@ export default function WorkspacePage() {
     setMobilePane("chat");
   }
 
-  function saveTask(next: Task) {
+  async function saveTask(next: Task, verified: boolean) {
+    if (persistedIds.includes(next.id)) {
+      try {
+        const response = await fetch(`/api/tasks/${next.id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ task: next }),
+        });
+        if (!response.ok) throw new Error("Не удалось сохранить карточку");
+        next = (await response.json() as { task: Task }).task;
+        if (verified) {
+          const confirmed = await fetch(`/api/tasks/${next.id}/grill/checkpoint`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ block: "all", action: "confirm" }),
+          });
+          if (!confirmed.ok) throw new Error("Не удалось подтвердить сведения");
+          next = (await confirmed.json() as { task: Task }).task;
+        }
+      } catch {
+        toast.error("Не удалось сохранить карточку");
+        return;
+      }
+    }
     setData((current) => ({
       ...current,
       tasks: current.tasks.map((item) => (item.id === next.id ? next : item)),
@@ -135,7 +187,44 @@ export default function WorkspacePage() {
       });
   }
 
-  function sendMessage(text: string, field?: TaskField) {
+  async function sendMessage(text: string, field?: TaskField) {
+    if (role === "business" && persistedIds.includes(task.id)) {
+      try {
+        const response = await fetch(`/api/tasks/${task.id}/grill/turn`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ answer: text }),
+        });
+        if (!response.ok) throw new Error("Не удалось сохранить ответ");
+        const result = await response.json() as {
+          task: Task;
+          question: { field: TaskField; question: string } | null;
+        };
+        setData((current) => ({
+          ...current,
+          tasks: current.tasks.map((item) => item.id === result.task.id ? result.task : item),
+        }));
+        setServerQuestions((current) => {
+          const updated = { ...current };
+          if (result.question) updated[task.id] = result.question;
+          else delete updated[task.id];
+          return updated;
+        });
+        setConversations((current) => ({
+          ...current,
+          [conversationKey]: [
+            ...(current[conversationKey] ?? []),
+            { id: crypto.randomUUID(), role: "user", content: text },
+            { id: crypto.randomUUID(), role: "assistant", content: result.question
+              ? `Ответ сохранён в карточке. Следующий вопрос: ${result.question.question}`
+              : "Ответ сохранён. Проверьте карточку и подтвердите сведения перед публикацией." },
+          ],
+        }));
+      } catch {
+        toast.error("Не удалось сохранить ответ. Попробуйте ещё раз.");
+      }
+      return;
+    }
     let response = "";
     if (role === "business" && field) {
       const label = TASK_FIELDS.find((item) => item.key === field)?.label;
@@ -196,7 +285,11 @@ export default function WorkspacePage() {
 
   function resetDemo() {
     const next = getDemoData();
-    setData(next);
+    setData((current) => ({
+      ...next,
+      tasks: [...current.tasks.filter((item) => persistedIds.includes(item.id)), ...next.tasks],
+      proposals: [...current.proposals.filter((item) => persistedIds.includes(item.taskId)), ...next.proposals],
+    }));
     setConversations({});
     setTaskDrafts({});
     setResetGeneration((current) => current + 1);
@@ -341,6 +434,7 @@ export default function WorkspacePage() {
             role={role}
             task={task}
             messages={messages}
+            currentQuestion={persistedIds.includes(task.id) ? (serverQuestions[task.id] ?? null) : undefined}
             onSend={sendMessage}
             onEdit={() => setTab("card")}
           />
@@ -366,11 +460,30 @@ export default function WorkspacePage() {
         teams={data.teams}
         proposals={data.proposals}
         activeTeamId={teamId}
+        canUndoDecision={!persistedIds.includes(task.id)}
         onEditTask={() => {
           setTab("card");
           setMobilePane("chat");
         }}
-        onDecision={(id, decision) => {
+        onDecision={async (id, decision, reason) => {
+          if (persistedIds.includes(task.id)) {
+            try {
+              const response = await fetch(`/api/proposals/${id}/decision`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ decision: decision === "selected" ? "select" : decision === "rejected" ? "reject" : "defer", reason }),
+              });
+              if (!response.ok) throw new Error("Решение не сохранено");
+              const result = await response.json() as { proposal: Proposal };
+              setData((current) => ({
+                ...current,
+                proposals: current.proposals.map((proposal) => proposal.id === id ? result.proposal : proposal),
+              }));
+            } catch {
+              toast.error("Не удалось сохранить решение");
+            }
+            return;
+          }
           setData((current) => ({
             ...current,
             proposals: current.proposals.map((proposal) =>
@@ -391,7 +504,23 @@ export default function WorkspacePage() {
             },
           );
         }}
-        onApply={(input) => {
+        onApply={async (input) => {
+          if (persistedIds.includes(task.id)) {
+            try {
+              const response = await fetch(`/api/tasks/${task.id}/proposals`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ ...input, teamId }),
+              });
+              if (!response.ok) throw new Error("Отклик не сохранён");
+              const { proposal } = await response.json() as { proposal: Proposal };
+              setData((current) => ({ ...current, proposals: [...current.proposals, proposal] }));
+              toast.success("Предложение отправлено");
+            } catch {
+              toast.error("Не удалось отправить предложение");
+            }
+            return;
+          }
           const proposal = {
             ...input,
             id: crypto.randomUUID(),
@@ -408,7 +537,26 @@ export default function WorkspacePage() {
             description: "Переключитесь в роль бизнеса, чтобы увидеть отклик.",
           });
         }}
-        onMilestone={(id) => {
+        onMilestone={async (id) => {
+          if (persistedIds.includes(task.id)) {
+            const proposal = data.proposals.find((item) => item.id === id);
+            try {
+              const response = await fetch(`/api/proposals/${id}/milestone`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ evidenceUrl: proposal?.prototypeUrl }),
+              });
+              if (!response.ok) throw new Error("Этап не подтверждён");
+              setData((current) => ({
+                ...current,
+                proposals: current.proposals.map((item) => item.id === id ? { ...item, milestoneConfirmed: true } : item),
+              }));
+              toast.success("Этап подтверждён: +10 баллов команде");
+            } catch {
+              toast.error("Не удалось подтвердить этап");
+            }
+            return;
+          }
           setData((current) => ({
             ...current,
             proposals: current.proposals.map((proposal) =>
@@ -563,8 +711,20 @@ export default function WorkspacePage() {
       <NewTaskDialog
         open={showCreate}
         onOpenChange={setShowCreate}
-        onCreate={(description) => {
-          const next = createTask(description);
+        onCreate={async (description) => {
+          try {
+          const response = await fetch("/api/tasks", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ description }),
+          });
+          if (!response.ok) throw new Error("Не удалось создать задачу");
+          const { task: next, question } = await response.json() as {
+            task: Task;
+            question: { field: TaskField; question: string } | null;
+          };
+          setPersistedIds((current) => [...current, next.id]);
+          if (question) setServerQuestions((current) => ({ ...current, [next.id]: question }));
           setData((current) => ({
             ...current,
             tasks: [next, ...current.tasks],
@@ -575,6 +735,10 @@ export default function WorkspacePage() {
           toast.success("Черновик создан", {
             description: "Ответьте на вопросы или сразу откройте карточку.",
           });
+          } catch {
+            toast.error("Не удалось создать черновик. Проверьте соединение с базой данных.");
+            throw new Error("Не удалось создать черновик");
+          }
         }}
       />
       <Dialog open={showDemo} onOpenChange={setShowDemo}>
@@ -603,8 +767,8 @@ export default function WorkspacePage() {
             ))}
           </ol>
           <p className="text-[11px] leading-relaxed text-muted-foreground">
-            Данные хранятся в памяти вкладки и сбрасываются при обновлении
-            страницы. Отправки во внешние сервисы нет.
+            Примеры задач и откликов доступны для знакомства с интерфейсом.
+            Новые задачи и ответы сохраняются в рабочей базе данных.
           </p>
           <Button variant="outline" onClick={resetDemo} className="mt-2">
             <RotateCcw className="size-3.5" />

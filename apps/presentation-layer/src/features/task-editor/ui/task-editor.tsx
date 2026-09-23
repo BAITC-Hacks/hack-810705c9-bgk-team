@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { ArrowUpRight, Check, ChevronDown, Info, Save } from "lucide-react";
 import {
   TASK_FIELDS,
@@ -26,11 +26,21 @@ import { cn } from "@/shared/lib/utils";
 type TaskEditorProps = {
   task: Task;
   savedTask?: Task;
-  onSave: (task: Task) => void;
+  onSave: (task: Task, verified: boolean) => void;
   onCancel?: () => void;
 };
 
 type EditorErrors = { title?: string; need?: string; confirmation?: string };
+type ScoreLine = { node: string; points: number; max: number; reason: string };
+
+const NODE_LABELS: Record<string, string> = {
+  "context.current": "Текущий процесс", "context.size": "Масштаб проблемы", "context.change": "Что изменится",
+  "data.what": "Данные и материалы", "data.volume": "Объём данных", "data.sample": "Пример данных",
+  "result.artifact": "Результат", "result.acceptance": "Формат сдачи", "criteria.items": "Критерии приёмки",
+  "constraints.deadline": "Срок", "constraints.stack": "Стек и роли", "constraints.other": "Другие ограничения",
+  "users.role": "Пользователи", "users.scale": "Количество пользователей",
+  "link.contact": "Контакт", "link.cadence": "Консультации", "link.response": "Ответ на отклик",
+};
 
 function nonemptyFields(task: Task): TaskField[] {
   return TASK_FIELDS.filter((field) => task.fields[field.key].trim()).map(
@@ -93,6 +103,16 @@ export function TaskEditor({
     verified: isFullyConfirmed(task),
   }));
   const [errors, setErrors] = useState<EditorErrors>({});
+  const [serverScoreLines, setServerScoreLines] = useState<ScoreLine[] | null>(null);
+  useEffect(() => {
+    if (savedTask.score === undefined) return;
+    let active = true;
+    fetch(`/api/tasks/${savedTask.id}/score`)
+      .then((response) => response.ok ? response.json() as Promise<{ lines: ScoreLine[] }> : null)
+      .then((result) => { if (active && result) setServerScoreLines(result.lines); })
+      .catch(() => { if (active) setServerScoreLines(null); });
+    return () => { active = false; };
+  }, [savedTask.id, savedTask.score]);
 
   if (editor.source !== task) {
     const draft = mergeTask(editor.source, editor.draft, task);
@@ -189,7 +209,7 @@ export function TaskEditor({
       draft: nextTask,
       verified: isFullyConfirmed(nextTask),
     }));
-    onSave(nextTask);
+    onSave(nextTask, verified);
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -272,7 +292,7 @@ export function TaskEditor({
             >
               {savedReadiness.label}
             </span>
-            {changed ? (
+            {changed && savedTask.score === undefined ? (
               <span className="text-[#858391]">
                 {isPublished && !verified ? "Предпросмотр" : "После сохранения"}
                 :{" "}
@@ -291,7 +311,14 @@ export function TaskEditor({
               />
             </summary>
             <div className="mt-4 space-y-3">
-              {breakdown.map((group, index) => (
+              {savedTask.score !== undefined ? (
+                serverScoreLines ? serverScoreLines.map((line) => (
+                  <div key={line.node} className="flex items-center justify-between gap-4 text-xs">
+                    <span className="text-[#595667]">{NODE_LABELS[line.node] ?? line.node}</span>
+                    <span className="shrink-0 tabular-nums text-[#858391]">{line.points} / {line.max}</span>
+                  </div>
+                )) : <p className="text-xs text-[#858391]">Расшифровка временно недоступна.</p>
+              ) : breakdown.map((group, index) => (
                 <div key={group.label}>
                   <div className="flex items-center justify-between gap-4 text-xs">
                     <span className="text-[#595667]">{group.label}</span>

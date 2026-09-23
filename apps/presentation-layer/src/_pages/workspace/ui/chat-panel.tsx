@@ -32,20 +32,23 @@ type Props = {
   role: Role;
   task: Task;
   messages: Message[];
+  currentQuestion?: { field: TaskField; question: string } | null;
   onSend: (text: string, field?: TaskField) => void;
   onEdit: () => void;
 };
 
-export function ChatPanel({ role, task, messages, onSend, onEdit }: Props) {
+export function ChatPanel({ role, task, messages, currentQuestion, onSend, onEdit }: Props) {
   const [input, setInput] = useState("");
   const [answerField, setAnswerField] = useState<TaskField | undefined>();
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const questions = suggestQuestions(task);
+  const questions = currentQuestion === undefined
+    ? suggestQuestions(task)
+    : currentQuestion ? [currentQuestion] : [];
   const score = calculateScore(task);
   const field = TASK_FIELDS.find((item) => item.key === answerField);
   function send() {
     if (!input.trim()) return;
-    onSend(input.trim(), answerField);
+    onSend(input.trim(), currentQuestion === undefined ? answerField : currentQuestion?.field);
     setInput("");
     setAnswerField(undefined);
     inputRef.current?.focus();

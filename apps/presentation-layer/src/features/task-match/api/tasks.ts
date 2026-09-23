@@ -213,7 +213,7 @@ export async function checkpoint(taskId: string, input: unknown) {
   if (!row) throw new ApiError(404, 'NOT_FOUND', 'Задача не найдена');
   if (action === 'confirm') await db.transaction(async (tx) => {
     const fields = await tx.select().from(taskFields).where(eq(taskFields.taskId, taskId));
-    for (const field of fields.filter((item) => item.state === 'suggested' && (block === 'draft' ? item.source === 'draft' : item.key.startsWith(`${block}.`)))) {
+    for (const field of fields.filter((item) => item.state === 'suggested' && (block === 'all' || (block === 'draft' ? item.source === 'draft' : item.key.startsWith(`${block}.`))))) {
       await tx.update(taskFields).set({ state: 'confirmed', revision: field.revision + 1 }).where(eq(taskFields.id, field.id));
     }
     const fresh = await tx.select().from(taskFields).where(eq(taskFields.taskId, taskId));
