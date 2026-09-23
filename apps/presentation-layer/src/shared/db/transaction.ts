@@ -6,9 +6,10 @@
  * `runInTransaction` — единственная точка, где use-case открывает
  * транзакцию. Реальная реализация делегирует в `db.transaction` (Drizzle,
  * `nextjs_db`); пока схема ADR-004/005/007 не подключена, используется
- * `inMemoryTransaction`, которая просто выполняет колбэк (in-memory store
- * не нуждается в блокировках single-process demo, но сохраняет то же API
- * и порядок вызовов, поэтому переключение на Drizzle не меняет use-case).
+ * `inMemoryTransaction`, которая выполняет колбэк без каких-либо `await`
+ * внутри — единственный поток Node/Bun не может прерваться посреди
+ * синхронного блока, поэтому «проверка условия → запись» внутри колбэка
+ * атомарна и для in-memory store.
  */
 
 export type Transaction = unknown;
@@ -18,10 +19,23 @@ export type TransactionRunner = <T>(
 ) => Promise<T>;
 
 /**
- * INTEGRATION(ADR-004/005/007): заменить на `db.transaction(fn)` из
- * `src/shared/db/index.ts`, когда таблицы task_field/grill_session/... появятся
- * в схеме. Сигнатура (fn: (tx) => T) совпадает с Drizzle, поэтому замена не
- * требует правок в use-case, только смены импорта.
+ * INTEGRATION(ADR-004/005/007): при переносе на Drizzle это НЕ просто смена
+ * импорта. `db.transaction(fn)` даёт изоляцию только тем операциям, которые
+ * сами являются условными SQL-запросами внутри `fn` — конкурентная запись
+ * снаружи транзакции всё равно всё увидит устаревшим. Поэтому:
+ *   - любая проверка версии/статуса, от которой зависит 409, должна быть
+ *     ПЕРВОЙ строкой внутри `fn` и выражена как условный `UPDATE ... SET
+ *     version = version + 1 WHERE task_id = $1 AND version = $2 RETURNING *`
+ *     (или `WHERE status IN (...)` для переходов состояния); 0 строк в
+ *     `RETURNING` -> 409, а не отдельный `SELECT` до `db.transaction`;
+ *   - `fn` не должен содержать `await` на внешние сервисы (AI, сеть) — эти
+ *     вызовы обязаны завершиться ДО вызова `runInTransaction`, иначе
+ *     транзакция Drizzle держит соединение/блокировки на время внешнего
+ *     вызова (ADR-003 §5, «Альтернативы»).
+ * Use-case, вызывающие `inMemoryTransaction`, уже написаны в этом стиле
+ * (проверка — первая строка внутри колбэка, колбэк синхронный), поэтому
+ * замена на `db.transaction` — это замена условных Map-операций на условные
+ * `UPDATE ... RETURNING`, а не смена одной строки импорта.
  */
 export const inMemoryTransaction: TransactionRunner = async (fn) => {
   return await fn({});

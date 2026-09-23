@@ -65,7 +65,14 @@ export function jsonOk<TSchema extends z.ZodType>(
   init?: { status?: number },
 ): NextResponse<z.infer<TSchema>> {
   // Валидируем форму ответа схемой — контракт остаётся источником истины и
-  // для запроса, и для ответа (ADR-009 §3).
-  const parsed = schema.parse(data);
-  return NextResponse.json(parsed, { status: init?.status ?? 200 });
+  // для запроса, и для ответа (ADR-009 §3). Несоответствие здесь — баг
+  // use-case/маппинга, а не ввод клиента, поэтому не должно превращаться в
+  // 422 через общий ZodError-путь `toErrorResponse`: заворачиваем в обычный
+  // `Error`, который уйдёт по ветке "неизвестная ошибка" -> 500, залогируется
+  // и не раскроет клиенту внутренние детали схемы.
+  const result = schema.safeParse(data);
+  if (!result.success) {
+    throw new Error(`Response failed schema validation: ${result.error.message}`);
+  }
+  return NextResponse.json(result.data, { status: init?.status ?? 200 });
 }

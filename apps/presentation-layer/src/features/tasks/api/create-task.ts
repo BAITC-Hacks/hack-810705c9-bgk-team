@@ -70,8 +70,10 @@ export async function createTask(
 
     const fields = new Map<NodeId, InternalField>();
     for (const extracted of analysis.fields) {
-      // AI-6/ADR-003 §4: BFF повторно проверяет цитату по сохранённому тексту.
-      if (!request.draftText.includes(extracted.sourceQuote)) continue;
+      // AI-6/ADR-003 §4: BFF повторно проверяет цитату по сохранённому
+      // тексту. Пустая цитата отбрасывается явно — `''.includes('')` всегда
+      // `true`, так что без этой проверки поле без реальной цитаты проходило бы.
+      if (!extracted.sourceQuote || !request.draftText.includes(extracted.sourceQuote)) continue;
       fields.set(extracted.node, {
         node: extracted.node,
         value: extracted.value,

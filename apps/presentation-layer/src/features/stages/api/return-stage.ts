@@ -4,7 +4,10 @@ import { conflict, forbidden, notFound } from '@/shared/api/errors';
 import { store, toApiStage } from '@/shared/api/store';
 import { inMemoryTransaction } from '@/shared/db/transaction';
 
-/** ADR-007 §5: return выполняет бизнес из claimed с обязательным комментарием. */
+/**
+ * ADR-007 §5: return выполняет бизнес из claimed с обязательным
+ * комментарием. Статус — первая строка внутри транзакции.
+ */
 export async function returnStage(
   actor: DemoActor,
   stageId: string,
@@ -19,11 +22,11 @@ export async function returnStage(
   if (actor.role !== 'business' || actor.businessId !== task.businessId) {
     throw forbidden('Вернуть этап может только бизнес — владелец задачи.');
   }
-  if (stage.status !== 'claimed') {
-    throw conflict('Вернуть можно только сданный этап.', { status: stage.status });
-  }
 
-  return inMemoryTransaction(async () => {
+  return inMemoryTransaction(() => {
+    if (stage.status !== 'claimed') {
+      throw conflict('Вернуть можно только сданный этап.', { status: stage.status });
+    }
     stage.status = 'returned';
     stage.businessComment = request.businessComment;
     return { stage: toApiStage(stage) };

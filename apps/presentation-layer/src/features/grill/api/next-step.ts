@@ -3,6 +3,15 @@ import type { InternalGrillSession, InternalTask } from '@/shared/api/store/doma
 import { BLOCK_ORDER, NODES_BY_BLOCK } from '@/shared/api/store/nodes';
 
 /**
+ * Только то подмножество `InternalTask`, которое читает `nextStep`. Вызывающая
+ * сторона (`submit-turn.ts`) считает следующий шаг на ПРОЕЦИРУЕМОМ состоянии
+ * (какими будут поля после записи ответа) ДО открытия транзакции, не
+ * мутируя реальную задачу в сторе — поэтому достаточно `fields`/`criteria`,
+ * а не полного `InternalTask`.
+ */
+export type NextStepTaskView = Pick<InternalTask, 'fields' | 'criteria'>;
+
+/**
  * INTEGRATION(ADR-004 §2): чистая функция `nextStep(session, task)`.
  * Полная версия — дерево прожарки с ветками FR-1.8 («данных нет», профиль
  * результата) и обработкой pushback (FR-1.7) — принадлежит владельцу
@@ -15,7 +24,7 @@ export type NextStepResult =
   | { kind: 'checkpoint'; block: BlockId }
   | { kind: 'done' };
 
-function isNodeOpen(task: InternalTask, node: NodeId): boolean {
+function isNodeOpen(task: NextStepTaskView, node: NodeId): boolean {
   if (node === 'criteria.items') {
     return task.criteria.some((c) => c.state === 'empty');
   }
@@ -23,11 +32,11 @@ function isNodeOpen(task: InternalTask, node: NodeId): boolean {
   return !field || field.state === 'empty';
 }
 
-function blockHasOpenNode(task: InternalTask, block: BlockId): boolean {
+function blockHasOpenNode(task: NextStepTaskView, block: BlockId): boolean {
   return NODES_BY_BLOCK[block].some((node) => isNodeOpen(task, node));
 }
 
-export function nextStep(session: InternalGrillSession, task: InternalTask): NextStepResult {
+export function nextStep(session: InternalGrillSession, task: NextStepTaskView): NextStepResult {
   const blockIndex = BLOCK_ORDER.indexOf(session.currentBlock);
   for (let i = blockIndex; i < BLOCK_ORDER.length; i += 1) {
     const block = BLOCK_ORDER[i];

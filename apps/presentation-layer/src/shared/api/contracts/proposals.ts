@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-import { optionalUrlSchema, proposalStatusSchema, rejectReasonSchema } from './common';
+import {
+  optionalUrlSchema,
+  proposalStatusSchema,
+  rejectReasonSchema,
+  storedRejectReasonSchema,
+} from './common';
 
 /** FR-6.1/FR-6.2: идея, план, роли, срок обязательны; ссылка опциональна. */
 export const submitProposalRequestSchema = z.object({
@@ -30,7 +35,7 @@ export const proposalSchema = z.object({
   ),
   fit: z.number().min(0).max(1),
   status: proposalStatusSchema,
-  rejectReason: rejectReasonSchema.optional(),
+  rejectReason: storedRejectReasonSchema.optional(),
   rejectNote: z.string().optional(),
   decidedAt: z.string().optional(),
   partialMatch: z.boolean(),
@@ -52,11 +57,16 @@ export const listProposalsResponseSchema = z.object({
 });
 export type ListProposalsResponse = z.infer<typeof listProposalsResponseSchema>;
 
-/** FR-7.5: отклонение требует причину из enum, для 'other' обязателен текст. */
+/**
+ * FR-7.5: отклонение требует причину из enum, для 'other' обязателен текст.
+ * `resume` — ADR-007 §3: «on_hold ↔ submitted разрешено в обе стороны»;
+ * `hold` идёт submitted → on_hold, `resume` — обратно.
+ */
 export const decisionRequestSchema = z
   .discriminatedUnion('action', [
     z.object({ action: z.literal('accept') }),
     z.object({ action: z.literal('hold') }),
+    z.object({ action: z.literal('resume') }),
     z.object({
       action: z.literal('reject'),
       reason: rejectReasonSchema,

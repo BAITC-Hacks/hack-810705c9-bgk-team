@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { readinessLevelSchema, taskSchema, workFormatSchema } from './common';
+import { publicTaskSchema, readinessLevelSchema, workFormatSchema } from './common';
 
 /** GET /api/catalog?topic=&level=&role=&format= (FR-4.5). */
 export const catalogQuerySchema = z.object({
@@ -12,7 +12,7 @@ export const catalogQuerySchema = z.object({
 export type CatalogQuery = z.infer<typeof catalogQuerySchema>;
 
 export const catalogItemSchema = z.object({
-  task: taskSchema,
+  task: publicTaskSchema,
   label: z.enum(['needs_clarification', 'fully_ready']).optional(),
   unknown: z.array(z.object({ node: z.string(), weight: z.number() })),
 });

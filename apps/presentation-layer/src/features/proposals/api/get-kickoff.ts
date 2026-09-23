@@ -1,6 +1,6 @@
 import type { KickoffResponse } from '@/shared/api/contracts/proposals';
 import type { DemoActor } from '@/shared/api/demo-actor';
-import { businessError, forbidden, notFound } from '@/shared/api/errors';
+import { conflict, forbidden, notFound } from '@/shared/api/errors';
 import { store } from '@/shared/api/store';
 
 /**
@@ -20,7 +20,9 @@ export function getKickoff(actor: DemoActor, proposalId: string): KickoffRespons
     throw forbidden('Стартовый пакет виден только бизнесу-владельцу и выбранной команде.');
   }
   if (!proposal.kickoff) {
-    throw businessError('Команда ещё не выбрана — стартовый пакет не собран.');
+    // Отклик существует, но ещё не в состоянии, дающем kickoff — переход
+    // состояния, не ошибка ввода (409, не 422).
+    throw conflict('Команда ещё не выбрана — стартовый пакет не собран.');
   }
 
   return { proposalId: proposal.id, ...proposal.kickoff };

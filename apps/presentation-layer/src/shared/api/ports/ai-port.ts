@@ -10,6 +10,8 @@
  * деградации к шаблону (`fallbackUsed: true`), а не как ошибку запроса.
  */
 
+import { z } from 'zod';
+
 export type NodeId =
   | 'context.current'
   | 'context.size'
@@ -59,6 +61,44 @@ export interface AiPort {
   analyzeText(input: AnalyzeTextInput): Promise<AnalyzeTextOutput>;
   phraseQuestion(input: PhraseQuestionInput): Promise<PhraseQuestionOutput>;
 }
+
+/**
+ * ADR-003 §3 (guards): Mastra уже должна была провалидировать структуру
+ * zod-схемой на своей стороне, но BFF — авторитетная сторона для проверки
+ * цитаты (§4) и не должен доверять сети вслепую. Эти схемы валидируют
+ * ФОРМУ ответа порта (`mastra-ai-port.ts`): несовпадение бросает ZodError,
+ * которую вызывающий use-case ловит как обычную ошибку AI-вызова и уходит
+ * в fallback, а не в необработанное исключение/500.
+ */
+const nodeIdZod = z.custom<NodeId>((value) => typeof value === 'string');
+
+export const analyzeTextOutputSchema = z.object({
+  nodes: z.array(
+    z.object({
+      node: nodeIdZod,
+      covered: z.boolean(),
+      evidence: z.string().optional(),
+      specificity: z.number().optional(),
+    }),
+  ),
+  fields: z.array(
+    z.object({
+      node: nodeIdZod,
+      value: z.string(),
+      sourceQuote: z.string(),
+      specificity: z.number(),
+    }),
+  ),
+  roles: z.array(z.string()),
+  skills: z.array(z.string()),
+});
+
+export const phraseQuestionOutputSchema = z.object({
+  question: z.string().min(1),
+  options: z.array(z.string()),
+  target: nodeIdZod,
+  isPushback: z.boolean(),
+});
 
 /**
  * Заглушка на правилах (ADR-003 §5, AI-9): используется, пока Mastra не

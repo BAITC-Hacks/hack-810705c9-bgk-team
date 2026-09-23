@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { taskSchema } from './common';
+import { publicTaskSchema } from './common';
 
 export const recommendationsParamsSchema = z.object({ id: z.string().min(1) });
 
@@ -14,7 +14,7 @@ const fitExplanationSchema = z.object({
 });
 
 export const recommendationItemSchema = z.object({
-  task: taskSchema,
+  task: publicTaskSchema,
   fit: fitExplanationSchema,
   rankScore: z.number(),
 });

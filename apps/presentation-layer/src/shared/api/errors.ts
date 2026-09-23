@@ -4,7 +4,14 @@ import { z } from 'zod';
 /**
  * ADR-009: единый формат ошибок { error: { code, message, details? } },
  * message — по-русски, для человека.
+ *
+ * NFR-4: сообщения по умолчанию у zod — на английском. `errors.ts`
+ * импортируется каждым `route.ts` через `shared/api/handler.ts` раньше
+ * любого `schema.parse(...)`, поэтому один вызов `z.config` здесь
+ * гарантированно выполняется до первого разбора запроса и покрывает все
+ * контракты без отдельного вызова в каждом файле.
  */
+z.config(z.locales.ru());
 
 export type ApiErrorCode =
   | 'invalid_json'

@@ -1,7 +1,8 @@
 import type { RecommendationsResponse } from '@/shared/api/contracts/recommendations';
 import { notFound } from '@/shared/api/errors';
-import { store, toApiTask } from '@/shared/api/store';
+import { store, toPublicTask } from '@/shared/api/store';
 import { fit, formatMatches } from '@/shared/api/store/fit';
+import { calculateScore } from '@/shared/api/store/scoring';
 
 /**
  * INTEGRATION(ADR-006 §2): getRecommendations(teamId) — один набор для
@@ -28,16 +29,19 @@ export function getRecommendations(teamId: string): RecommendationsResponse {
 
   const scored = candidates
     .map((task) => {
-      const apiTask = toApiTask(task);
+      const score = calculateScore(task);
       const matchDetails = fit(team, task);
       return {
-        task: apiTask,
+        task,
+        score,
         fit: matchDetails,
-        rankScore: 0.7 * matchDetails.value + 0.3 * (apiTask.score / 100),
+        rankScore: 0.7 * matchDetails.value + 0.3 * (score / 100),
       };
     })
-    .filter((item) => item.fit.value >= 0.5 && item.task.score >= 40)
-    .sort((a, b) => (b.rankScore !== a.rankScore ? b.rankScore - a.rankScore : a.task.id.localeCompare(b.task.id)));
+    .filter((item) => item.fit.value >= 0.5 && item.score >= 40)
+    .sort((a, b) => (b.rankScore !== a.rankScore ? b.rankScore - a.rankScore : a.task.id.localeCompare(b.task.id)))
+    // ADR-008 §3: команда видит только подтверждённые поля чужой задачи.
+    .map((item) => ({ task: toPublicTask(item.task), fit: item.fit, rankScore: item.rankScore }));
 
   const catalogTotal = [...store.tasks.values()].filter((task) => task.status === 'published').length;
 

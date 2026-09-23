@@ -7,7 +7,8 @@ import { inMemoryTransaction } from '@/shared/db/transaction';
 /**
  * ADR-007 §5 (FR-8.4): `UPDATE stage SET status='confirmed', points=10 …
  * WHERE status='claimed'`. Этап не может вернуться из confirmed, поэтому
- * повторный confirm -> 409, а +10 начисляется один раз без отдельного ledger.
+ * повторный confirm -> 409, а +10 начисляется один раз без отдельного
+ * ledger. Статус — первая строка внутри транзакции.
  */
 export async function confirmStage(
   actor: DemoActor,
@@ -23,11 +24,11 @@ export async function confirmStage(
   if (actor.role !== 'business' || actor.businessId !== task.businessId) {
     throw forbidden('Подтвердить этап может только бизнес — владелец задачи.');
   }
-  if (stage.status !== 'claimed') {
-    throw conflict('Подтвердить можно только сданный этап.', { status: stage.status });
-  }
 
-  return inMemoryTransaction(async () => {
+  return inMemoryTransaction(() => {
+    if (stage.status !== 'claimed') {
+      throw conflict('Подтвердить можно только сданный этап.', { status: stage.status });
+    }
     stage.status = 'confirmed';
     stage.points = 10;
     stage.businessComment = request.businessComment ?? stage.businessComment;

@@ -6,6 +6,8 @@ import { inMemoryTransaction } from '@/shared/db/transaction';
 
 /**
  * ADR-007 §5: claim выполняет команда-владелец отклика из open|returned.
+ * Статус — первая строка внутри транзакции (условный `UPDATE ... WHERE
+ * status IN ('open','returned')` при переносе на Drizzle).
  */
 export async function claimStage(
   actor: DemoActor,
@@ -19,11 +21,11 @@ export async function claimStage(
   if (actor.role !== 'team' || actor.teamId !== proposal.teamId) {
     throw forbidden('Сдать этап может только команда, чей отклик выбран.');
   }
-  if (stage.status !== 'open' && stage.status !== 'returned') {
-    throw conflict('Этап нельзя сдать в текущем статусе.', { status: stage.status });
-  }
 
-  return inMemoryTransaction(async () => {
+  return inMemoryTransaction(() => {
+    if (stage.status !== 'open' && stage.status !== 'returned') {
+      throw conflict('Этап нельзя сдать в текущем статусе.', { status: stage.status });
+    }
     stage.status = 'claimed';
     stage.reportUrl = request.reportUrl;
     stage.teamComment = request.teamComment;

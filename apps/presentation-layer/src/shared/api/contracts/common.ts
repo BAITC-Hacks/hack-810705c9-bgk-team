@@ -54,8 +54,19 @@ export const proposalStatusSchema = z.enum([
 ]);
 export type ProposalStatus = z.infer<typeof proposalStatusSchema>;
 
+/** FR-7.5: причины, которые бизнес выбирает вручную при отклонении отклика. */
 export const rejectReasonSchema = z.enum(['roles', 'stack', 'deadline', 'plan', 'other']);
 export type RejectReason = z.infer<typeof rejectReasonSchema>;
+
+/**
+ * ADR-007 §4 (T-17): `POST /tasks/:id/close` системно переводит открытые
+ * отклики в `rejected` с причиной `task_closed` — это не одна из причин,
+ * которую бизнес выбирает в форме отклонения (FR-7.5), поэтому она не входит
+ * в `rejectReasonSchema` запроса `decision`, но обязана проходить валидацию
+ * ответа (`proposalSchema.rejectReason`), где хранится любая причина.
+ */
+export const storedRejectReasonSchema = z.union([rejectReasonSchema, z.literal('task_closed')]);
+export type StoredRejectReason = z.infer<typeof storedRejectReasonSchema>;
 
 export const stageStatusSchema = z.enum(['open', 'claimed', 'confirmed', 'returned']);
 export type StageStatus = z.infer<typeof stageStatusSchema>;
@@ -115,6 +126,17 @@ export const taskSchema = z.object({
   publishedAt: z.string().optional(),
 });
 export type ApiTask = z.infer<typeof taskSchema>;
+
+/**
+ * ADR-008 §3: команда видит только `confirmed`-поля чужой (опубликованной)
+ * задачи; черновой текст (`draftText`) и внутренний `businessId` не
+ * относятся к тому, что показывает каталог/рекомендации. Каталог и
+ * рекомендации (`contracts/catalog.ts`, `contracts/recommendations.ts`)
+ * отдают эту, «публичную», форму задачи, а не полную `taskSchema`,
+ * используемую в ответах эндпоинтов, которые читает бизнес-владелец.
+ */
+export const publicTaskSchema = taskSchema.omit({ businessId: true, draftText: true });
+export type PublicApiTask = z.infer<typeof publicTaskSchema>;
 
 /** Общий параметр маршрута с идентификатором. */
 export const idParamSchema = z.object({ id: z.string().min(1, 'Не передан идентификатор.') });

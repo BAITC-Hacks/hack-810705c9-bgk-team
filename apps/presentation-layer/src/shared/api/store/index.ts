@@ -1,4 +1,4 @@
-import type { ApiTask, Criterion, Field } from '../contracts/common';
+import type { ApiTask, Criterion, Field, PublicApiTask } from '../contracts/common';
 import type { ApiAiLogEntry } from '../contracts/ai-log';
 import type { ApiProposal } from '../contracts/proposals';
 import type { ApiStage } from '../contracts/stages';
@@ -124,6 +124,34 @@ export function toApiTask(task: InternalTask): ApiTask {
     level: levelForScore(score),
     fields: [...task.fields.values()].map(toApiField),
     criteria: task.criteria.map(toApiCriterion),
+    criteriaVersion: task.criteriaVersion,
+    createdAt: task.createdAt,
+    publishedAt: task.publishedAt,
+  };
+}
+
+/**
+ * ADR-008 §3: форма задачи для каталога/рекомендаций — без черновика и
+ * `businessId`, поля отфильтрованы до `confirmed` (то, что «неподтверждённые
+ * поля не публикуются», раньше было верно только для score(), но не для
+ * самого списка полей в ответе — эта функция и есть настоящая гарантия).
+ */
+export function toPublicTask(task: InternalTask): PublicApiTask {
+  const score = calculateScore(task);
+  return {
+    id: task.id,
+    title: task.title,
+    topic: task.topic,
+    status: task.status,
+    format: task.format,
+    paymentTerms: task.paymentTerms,
+    neededRoles: task.neededRoles,
+    neededSkills: task.neededSkills,
+    tagsState: task.tagsState,
+    score,
+    level: levelForScore(score),
+    fields: [...task.fields.values()].filter((field) => field.state === 'confirmed').map(toApiField),
+    criteria: task.criteria.filter((criterion) => criterion.state === 'confirmed').map(toApiCriterion),
     criteriaVersion: task.criteriaVersion,
     createdAt: task.createdAt,
     publishedAt: task.publishedAt,

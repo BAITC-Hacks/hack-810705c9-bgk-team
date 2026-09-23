@@ -3,8 +3,8 @@ import type {
   FieldState,
   NodeId,
   ProposalStatus,
-  RejectReason,
   StageStatus,
+  StoredRejectReason,
   TaskStatus,
   WorkFormat,
 } from '../contracts/common';
@@ -104,7 +104,7 @@ export type InternalProposal = {
   criteriaAnswers: { criterionId: string; howWeWillCheck: string }[];
   fit: number;
   status: ProposalStatus;
-  rejectReason?: RejectReason;
+  rejectReason?: StoredRejectReason;
   rejectNote?: string;
   decidedAt?: string;
   kickoff?: {
