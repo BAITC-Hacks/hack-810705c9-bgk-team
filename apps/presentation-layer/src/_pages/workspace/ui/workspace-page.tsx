@@ -24,6 +24,8 @@ import type {
   PanelImperativeHandle,
 } from "react-resizable-panels";
 import { toast } from "sonner";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   applyGrillPackage,
   buildAssistantContext,
@@ -34,8 +36,11 @@ import {
   isRoundPayload,
   isTranslatorPayload,
   parseFinalOutput,
+  getWorkspaceTasks,
+  workspaceIdentity,
   readiness,
   TASK_FIELDS,
+  type ChatAttachment,
   type Message,
   type Role,
   type RoundPayload,
@@ -133,10 +138,11 @@ const FOCUS_LAYOUT: Layout = {
 };
 
 export default function WorkspacePage() {
-  return <TaskDocumentsProvider><WorkspaceLoader /></TaskDocumentsProvider>;
+  return <WorkspaceLoader />;
 }
 
 function WorkspaceLoader() {
+  const router = useRouter();
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -166,12 +172,21 @@ function WorkspaceLoader() {
   }, []);
 
   async function changeSession(next: Partial<WorkspaceSession>) {
-    await workspaceApi.session(next);
-    await load();
+    // Hide controls while cookies and workspace data move to the new identity.
+    setLoading(true);
+    try {
+      await workspaceApi.session(next);
+      router.refresh();
+      await load();
+    } catch (failure) {
+      setSnapshot(null);
+      setError(requestError(failure));
+      throw failure;
+    } finally { setLoading(false); }
   }
 
   const setData: Dispatch<SetStateAction<WorkspaceData>> = (update) => {
-    setSnapshot((current) => current ? {
+    setSnapshot((current) => current && snapshot && workspaceIdentity(current.session) === workspaceIdentity(snapshot.session) ? {
       ...current,
       ...(typeof update === "function" ? update(current) : update),
     } : current);
@@ -188,9 +203,13 @@ function WorkspaceLoader() {
     </main>
   );
 
-  if (!snapshot.session.onboardingCompleted) return <OnboardingScreen snapshot={snapshot} onComplete={load} />;
+  if (!snapshot.session.onboardingCompleted) return <OnboardingScreen snapshot={snapshot} onComplete={async () => {
+    await load();
+    router.refresh();
+  }} />;
 
-  if (!snapshot.tasks.length) return (
+  const workspaceTasks = getWorkspaceTasks(snapshot.tasks, snapshot.session.role);
+  if (!workspaceTasks.length) return (
     <main className="flex min-h-dvh items-center justify-center p-6">
       <div className="absolute top-3 right-4"><ThemeToggle /></div>
       <div className="max-w-lg space-y-5 text-center">
@@ -215,7 +234,10 @@ function WorkspaceLoader() {
     </main>
   );
 
-  return <WorkspaceContent data={snapshot} setData={setData} session={snapshot.session} onSessionChange={changeSession} onReload={load} />;
+  return <TaskDocumentsProvider key={workspaceIdentity(snapshot.session)}>
+    <WorkspaceContent data={{ ...snapshot, tasks: workspaceTasks }} setData={setData}
+      session={snapshot.session} onSessionChange={changeSession} onReload={load} />
+  </TaskDocumentsProvider>;
 }
 
 function WorkspaceContent({ data, setData, session, onSessionChange, onReload }: {
@@ -503,7 +525,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
       });
   }
 
-  async function sendMessage(text: string, field?: TaskField, skill?: ChatSkillId) {
+  async function sendMessage(text: string, field?: TaskField, skill?: ChatSkillId, attachments?: ChatAttachment[]) {
     // Идёт прожарка — весь текст уходит в воркфлоу как ответы на вопросы.
     const activeGrill = grillSessions[conversationKey];
     if (activeGrill && !field && !skill && text.trim()) {
@@ -960,7 +982,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
         onSend={sendMessage}
         onEdit={openCard}
         onShowProposals={showProposals}
-        documents={taskDocuments.documents.map(({ id, file }) => ({ id, name: file.name }))}
+        onAddDocuments={taskDocuments.addDocuments}
         onShowDocuments={openDocuments}
         onShowShortcuts={() => setShortcutsOpen(true)}
         onGrill={startGrill}
@@ -1033,10 +1055,9 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
     >
       <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-4 sm:gap-3 lg:px-6">
         <div className="flex min-w-0 items-center gap-4">
-          <button
-            type="button"
-            onClick={() => setShowHelp(true)}
-            aria-label="О AI-Sana"
+          <Link
+            href="/onboarding"
+            aria-label="Вернуться к знакомству с платформой"
             data-logo-trigger
             className="flex h-9 shrink-0 items-center rounded focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
           >
@@ -1044,7 +1065,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
               aria-hidden="true"
               className="h-auto w-20 min-[375px]:w-24 sm:w-28"
             />
-          </button>
+          </Link>
           <span className="hidden h-5 w-px bg-border sm:block" />
           <span className="hidden items-center gap-3 text-[13px] font-medium text-muted-foreground xl:flex">
             Рабочее пространство

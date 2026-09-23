@@ -71,6 +71,11 @@ export function DemoRoleSwitch({ actor, view }: Props) {
         disabled={pending}
         onChange={(event) => submit({ role: actor.role, actorId: event.target.value })}
       >
+        {!ACTORS[actor.role].some((item) => item.id === actorId) && (
+          <NativeSelectOption value={actorId}>
+            {actor.role === "business" ? "Мой бизнес" : "Моя команда"}
+          </NativeSelectOption>
+        )}
         {ACTORS[actor.role].map((item) => (
           <NativeSelectOption key={item.id} value={item.id}>
             {item.name}

@@ -21,7 +21,7 @@ export function AppPageFrame({ children, teamId }: { children: ReactNode; teamId
     <div className="flex h-dvh min-h-0 flex-col bg-workspace-surface">
       <header className="shrink-0 border-b bg-background">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 lg:px-8">
-          <Link href="/" aria-label="AI Sana — рабочее пространство" data-logo-trigger className="rounded-md focus-visible:outline-2 focus-visible:outline-ring"><AiSanaLogo className="h-5 w-24" /></Link>
+          <Link href="/onboarding" aria-label="Вернуться к знакомству с платформой" data-logo-trigger className="rounded-md focus-visible:outline-2 focus-visible:outline-ring"><AiSanaLogo aria-hidden="true" className="h-5 w-24" /></Link>
           <nav aria-label="Основная навигация" className="order-last flex w-full gap-1 overflow-x-auto sm:order-none sm:w-auto">
             {links.map(({ href, label }) => <Link key={href} href={href} aria-current={pathname === href ? "page" : undefined} className={`shrink-0 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring ${pathname === href ? "bg-workspace-selected text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>{label}</Link>)}
           </nav>

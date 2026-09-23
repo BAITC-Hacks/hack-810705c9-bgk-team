@@ -10,6 +10,8 @@ export {
   type RoundPayload,
   type TranslatorPayload,
 } from "./grill";
+export { getWorkspaceTasks, workspaceIdentity } from "./task-scope";
+export { CHAT_ATTACHMENT_LIMIT, type ChatAttachment } from "./chat-contracts";
 export {
   TASK_FIELDS,
   calculateScore,
