@@ -204,6 +204,7 @@ async function guardedSession(tx: GrillTx, taskId: string, version: number, allo
 }
 
 async function advanceVersion(tx: GrillTx, session: typeof grillSession.$inferSelect) {
+  await tx.update(tasks).set({ version: sql`${tasks.version} + 1`, updatedAt: new Date() }).where(eq(tasks.id, session.taskId));
   const [updated] = await tx.update(grillSession).set({ version: session.version + 1, updatedAt: new Date() })
     .where(and(eq(grillSession.id, session.id), eq(grillSession.version, session.version)))
     .returning();

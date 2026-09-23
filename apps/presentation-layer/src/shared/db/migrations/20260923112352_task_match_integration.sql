@@ -7,7 +7,7 @@ CREATE TYPE "public"."grill_tags_state" AS ENUM('suggested', 'confirmed');--> st
 CREATE TYPE "public"."swipe_action" AS ENUM('skip', 'missing');--> statement-breakpoint
 CREATE TABLE "ai_logs" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"task_id" uuid NOT NULL,
+	"task_id" text NOT NULL,
 	"turn_id" integer,
 	"kind" text NOT NULL,
 	"agent" text NOT NULL,
@@ -28,12 +28,13 @@ CREATE TABLE "ai_logs" (
 CREATE TABLE "business" (
 	"id" text PRIMARY KEY NOT NULL,
 	"name" text NOT NULL,
-	"industry" text DEFAULT '' NOT NULL
+	"industry" text DEFAULT '' NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "criterion" (
 	"id" uuid DEFAULT gen_random_uuid() NOT NULL,
-	"task_id" uuid NOT NULL,
+	"task_id" text NOT NULL,
 	"position" integer NOT NULL,
 	"version" integer DEFAULT 1 NOT NULL,
 	"metric" text NOT NULL,
@@ -51,7 +52,7 @@ CREATE TABLE "criterion" (
 );
 --> statement-breakpoint
 CREATE TABLE "task_field" (
-	"task_id" uuid NOT NULL,
+	"task_id" text NOT NULL,
 	"node" text NOT NULL,
 	"value" text DEFAULT '' NOT NULL,
 	"state" "grill_field_state" DEFAULT 'suggested' NOT NULL,
@@ -69,7 +70,7 @@ CREATE TABLE "task_field" (
 --> statement-breakpoint
 CREATE TABLE "grill_session" (
 	"id" serial PRIMARY KEY NOT NULL,
-	"task_id" uuid NOT NULL,
+	"task_id" text NOT NULL,
 	"status" "grill_session_status" DEFAULT 'active' NOT NULL,
 	"current_node" text,
 	"current_block" text,
@@ -105,8 +106,8 @@ CREATE TABLE "grill_turn" (
 --> statement-breakpoint
 CREATE TABLE "proposal" (
 	"id" text PRIMARY KEY NOT NULL,
-	"task_id" uuid NOT NULL,
-	"team_id" uuid NOT NULL,
+	"task_id" text NOT NULL,
+	"team_id" text NOT NULL,
 	"solution" text NOT NULL,
 	"plan" text NOT NULL,
 	"team_roles" text[] NOT NULL,
@@ -127,7 +128,7 @@ CREATE TABLE "proposal" (
 --> statement-breakpoint
 CREATE TABLE "score_event" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"task_id" uuid NOT NULL,
+	"task_id" text NOT NULL,
 	"before" integer NOT NULL,
 	"after" integer NOT NULL,
 	"level_before" text NOT NULL,
@@ -159,8 +160,8 @@ CREATE TABLE "stage" (
 --> statement-breakpoint
 CREATE TABLE "swipe" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"team_id" uuid NOT NULL,
-	"task_id" uuid NOT NULL,
+	"team_id" text NOT NULL,
+	"task_id" text NOT NULL,
 	"action" "swipe_action" NOT NULL,
 	"block" text,
 	"note" text,
@@ -169,7 +170,9 @@ CREATE TABLE "swipe" (
 );
 --> statement-breakpoint
 CREATE TABLE "task" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"id" text PRIMARY KEY NOT NULL,
+	"version" integer DEFAULT 1 NOT NULL,
+	"legacy_workspace" jsonb,
 	"title" text DEFAULT '' NOT NULL,
 	"description" text NOT NULL,
 	"business_id" text NOT NULL,
@@ -191,14 +194,19 @@ CREATE TABLE "task" (
 );
 --> statement-breakpoint
 CREATE TABLE "team" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"id" text PRIMARY KEY NOT NULL,
+	"initials" text DEFAULT '' NOT NULL,
+	"tagline" text DEFAULT '' NOT NULL,
+	"members" integer DEFAULT 3 NOT NULL,
+	"color" text DEFAULT '' NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"name" text NOT NULL,
 	"roles" text[] DEFAULT '{}' NOT NULL,
 	"skills" text[] DEFAULT '{}' NOT NULL,
 	"technologies" text[] DEFAULT '{}' NOT NULL,
 	"interests" text[] DEFAULT '{}' NOT NULL,
-	"looking_for" "engagement" NOT NULL,
-	CONSTRAINT "team_name_unique" UNIQUE("name")
+	"looking_for" "engagement" DEFAULT 'both' NOT NULL
 );
 --> statement-breakpoint
 ALTER TABLE "ai_logs" ADD CONSTRAINT "ai_logs_task_id_task_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."task"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -221,3 +229,83 @@ CREATE INDEX "proposal_task_idx" ON "proposal" USING btree ("task_id");--> state
 CREATE INDEX "score_event_task_at_idx" ON "score_event" USING btree ("task_id","at" DESC NULLS LAST);--> statement-breakpoint
 CREATE UNIQUE INDEX "stage_proposal_criterion_uq" ON "stage" USING btree ("proposal_id","criterion_id");--> statement-breakpoint
 CREATE INDEX "stage_proposal_idx" ON "stage" USING btree ("proposal_id");
+--> statement-breakpoint
+-- Preserve original workspace rows before retiring the superseded plural tables.
+-- Group-level confirmations and legacy score events are provenance, not ADR-004
+-- node confirmations or ADR-005 score history. No criterion is inferred here.
+INSERT INTO "business" (id, name, industry, created_at)
+SELECT id, name, industry, created_at FROM businesses;
+--> statement-breakpoint
+INSERT INTO "team" (id, name, initials, tagline, skills, interests, members, color, created_at, updated_at)
+SELECT id, name, initials, tagline, skills, interests, members, color, created_at, updated_at FROM teams;
+--> statement-breakpoint
+INSERT INTO "task" (id, business_id, title, description, status, version, company, topic, created_at, updated_at, published_at, legacy_workspace)
+SELECT t.id, t.business_id, t.title, t.description, t.status::text, t.version,
+ b.name, b.industry, t.created_at, t.updated_at, t.published_at,
+ jsonb_build_object('schema', 'workspace-v1', 'task', to_jsonb(t),
+ 'fields', COALESCE((SELECT jsonb_agg(to_jsonb(f)) FROM task_fields f WHERE f.task_id=t.id), '[]'::jsonb),
+ 'scoreEvents', COALESCE((SELECT jsonb_agg(to_jsonb(e)) FROM score_events e WHERE e.task_id=t.id), '[]'::jsonb),
+ 'proposals', COALESCE((SELECT jsonb_agg(to_jsonb(p)) FROM proposals p WHERE p.task_id=t.id), '[]'::jsonb),
+ 'milestones', COALESCE((SELECT jsonb_agg(to_jsonb(m)) FROM milestones m JOIN proposals p ON p.id=m.proposal_id WHERE p.task_id=t.id), '[]'::jsonb))
+FROM tasks t JOIN businesses b ON b.id=t.business_id;
+--> statement-breakpoint
+INSERT INTO task_field (task_id, node, value, state, source, source_quote)
+SELECT task_id, CASE node::text WHEN 'context' THEN 'context.current' WHEN 'need' THEN 'context.change' WHEN 'contact' THEN 'link.contact' END,
+ value, 'suggested', 'manual', value
+FROM task_fields WHERE node::text IN ('context', 'need', 'contact') AND length(btrim(value)) > 0;
+--> statement-breakpoint
+INSERT INTO grill_session (task_id, status, draft_checkpoint_state)
+SELECT id, CASE WHEN status='draft' THEN 'active'::grill_session_status ELSE 'finished'::grill_session_status END, 'pending'
+FROM task;
+--> statement-breakpoint
+-- Legacy proposals have no structured criteria answers or fit inputs. Preserve
+-- accepted decisions. Only actual legacy delivery rows become stage snapshots.
+INSERT INTO proposal (id, task_id, team_id, solution, plan, team_roles, deadline, repo_url, criteria_answers, fit, status, created_at, updated_at, decided_at, accepted_at)
+SELECT id, task_id, team_id, idea, plan, '{}'::text[], timeline, NULLIF(prototype_url,''),
+ '{"criteriaVersion":1,"answers":{}}'::jsonb, 0,
+ CASE status::text WHEN 'selected' THEN 'accepted' WHEN 'rejected' THEN 'rejected' ELSE 'submitted' END,
+ created_at, updated_at, CASE WHEN status::text IN ('selected','rejected') THEN updated_at END,
+ CASE WHEN status::text='selected' THEN updated_at END
+FROM proposals;
+--> statement-breakpoint
+UPDATE task SET status='in_work' WHERE EXISTS (SELECT 1 FROM proposal p WHERE p.task_id=task.id AND p.status='accepted');
+--> statement-breakpoint
+-- Preserve actual legacy delivery evidence and decisions as immutable stage
+-- snapshots. These rows do not assert that ADR-004 criteria existed.
+INSERT INTO stage (id, proposal_id, criterion_id, criteria_version, position, metric, threshold, how_to_check, status, report_url, team_comment, points, claimed_at, confirmed_at)
+SELECT m.id, m.proposal_id, 'legacy:' || m.id, 1, 0, m.title, '',
+ 'Перенесённый этап workspace-v1; критерий не был структурирован',
+ CASE m.status::text WHEN 'confirmed' THEN 'confirmed' ELSE 'claimed' END,
+ m.result_url, m.comment, CASE m.status::text WHEN 'confirmed' THEN 10 ELSE 0 END,
+ m.submitted_at, m.confirmed_at FROM milestones m;
+--> statement-breakpoint
+UPDATE proposal p SET kickoff=jsonb_build_object(
+ 'items', COALESCE((SELECT jsonb_agg(jsonb_build_object('key', f.node::text, 'label', f.node::text, 'value',f.value)) FROM task_fields f WHERE f.task_id=p.task_id AND f.state::text='confirmed'), '[]'::jsonb),
+ 'firstStage', (SELECT jsonb_build_object('criterionId','legacy:' || m.id,'metric',m.title,'threshold','') FROM milestones m WHERE m.proposal_id=p.id),
+ 'contact', (SELECT f.value FROM task_fields f WHERE f.task_id=p.task_id AND f.node::text='contact' AND f.state::text='confirmed'),
+ 'builtAt', p.accepted_at)
+WHERE p.status='accepted';
+--> statement-breakpoint
+DROP TABLE milestones;
+--> statement-breakpoint
+DROP TABLE proposals;
+--> statement-breakpoint
+DROP TABLE score_events;
+--> statement-breakpoint
+DROP TABLE task_fields;
+--> statement-breakpoint
+DROP TABLE tasks;
+--> statement-breakpoint
+DROP TABLE teams;
+--> statement-breakpoint
+DROP TABLE businesses;
+--> statement-breakpoint
+DROP TYPE milestone_status;
+--> statement-breakpoint
+DROP TYPE proposal_status;
+--> statement-breakpoint
+DROP TYPE task_field_node;
+--> statement-breakpoint
+DROP TYPE task_field_state;
+--> statement-breakpoint
+DROP TYPE task_status;

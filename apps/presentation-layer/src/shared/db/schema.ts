@@ -1,24 +1,28 @@
-const id = () => text('id').primaryKey().$defaultFn(() => crypto.randomUUID());
 import { sql } from 'drizzle-orm';
 import { boolean, check, index, integer, jsonb, pgEnum, pgTable, primaryKey, real, uniqueIndex, serial, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 
-export const users = pgTable('users', {
-  id: serial('id').primaryKey(),
-  name: text('name').notNull(),
-  email: text('email').notNull().unique(),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
+const id = () => text('id').primaryKey().$defaultFn(() => crypto.randomUUID());
+
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const businesses = pgTable('business', {
   id: id(),
   name: text('name').notNull(),
   industry: text('industry').notNull().default(''),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const TASK_STATUSES = ['draft', 'published', 'in_work', 'closed'] as const;
 
 export const tasks = pgTable('task', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: id(),
+  version: integer('version').notNull().default(1),
+  legacyWorkspace: jsonb('legacy_workspace').$type<Record<string, unknown>>(),
   title: text('title').notNull().default(''),
   description: text('description').notNull(),
   businessId: text('business_id').notNull().references(() => businesses.id),
@@ -48,13 +52,9 @@ export const grillDraftCheckpointState = pgEnum('grill_draft_checkpoint_state', 
   'confirmed',
 ]);
 
-/**
- * task_id intentionally has no FK yet: the task table is owned by a separate
- * feature and is not present in nextjs_db's current schema.
- */
 export const grillSession = pgTable('grill_session', {
   id: serial('id').primaryKey(),
-  taskId: uuid('task_id').notNull().unique().references(() => tasks.id, { onDelete: 'cascade' }),
+  taskId: text('task_id').notNull().unique().references(() => tasks.id, { onDelete: 'cascade' }),
   status: grillSessionStatus('status').notNull().default('active'),
   currentNode: text('current_node'),
   currentBlock: text('current_block'),
@@ -94,7 +94,7 @@ export const grillTurn = pgTable('grill_turn', {
 ]);
 
 export const taskField = pgTable('task_field', {
-  taskId: uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  taskId: text('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
   node: text('node').notNull(),
   value: text('value').notNull().default(''),
   state: grillFieldState('state').notNull().default('suggested'),
@@ -114,7 +114,7 @@ export const taskField = pgTable('task_field', {
 
 export const criterion = pgTable('criterion', {
   id: uuid('id').defaultRandom().notNull().unique(),
-  taskId: uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  taskId: text('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
   position: integer('position').notNull(),
   version: integer('version').notNull().default(1),
   metric: text('metric').notNull(),
@@ -134,7 +134,7 @@ export const scoreEvent = pgTable(
   'score_event',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    taskId: uuid('task_id')
+    taskId: text('task_id')
       .notNull()
       .references(() => task.id, { onDelete: 'cascade' }),
     before: integer('before').notNull(),
@@ -152,7 +152,7 @@ export const scoreEvent = pgTable(
 
 export const aiLogs = pgTable('ai_logs', {
   id: uuid('id').defaultRandom().primaryKey(),
-  taskId: uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  taskId: text('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
   turnId: integer('turn_id').references(() => grillTurn.id, { onDelete: 'set null' }),
   kind: text('kind').notNull(),
   agent: text('agent').notNull(),
@@ -183,23 +183,29 @@ export type ScoreEventRow = typeof scoreEvent.$inferSelect;
 export const engagement = pgEnum('engagement', ['paid', 'practice', 'both']);
 export const swipeAction = pgEnum('swipe_action', ['skip', 'missing']);
 export const teams = pgTable('team', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  name: text('name').notNull().unique(),
+  id: id(),
+  initials: text('initials').notNull().default(''),
+  tagline: text('tagline').notNull().default(''),
+  members: integer('members').notNull().default(3),
+  color: text('color').notNull().default(''),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  name: text('name').notNull(),
   roles: text('roles').array().notNull().default([]),
   skills: text('skills').array().notNull().default([]),
   technologies: text('technologies').array().notNull().default([]),
   interests: text('interests').array().notNull().default([]),
-  lookingFor: engagement('looking_for').notNull(),
+  lookingFor: engagement('looking_for').notNull().default('both'),
 });
 
 export const swipes = pgTable(
   'swipe',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    teamId: uuid('team_id')
+    teamId: text('team_id')
       .notNull()
       .references(() => teams.id, { onDelete: 'cascade' }),
-    taskId: uuid('task_id')
+    taskId: text('task_id')
       .notNull()
       .references(() => tasks.id, { onDelete: 'cascade' }),
     action: swipeAction('action').notNull(),
@@ -233,10 +239,10 @@ export const proposals = pgTable(
   'proposal',
   {
     id: id(),
-    taskId: uuid('task_id')
+    taskId: text('task_id')
       .notNull()
       .references(() => tasks.id),
-    teamId: uuid('team_id')
+    teamId: text('team_id')
       .notNull()
       .references(() => teams.id),
     solution: text('solution').notNull(),

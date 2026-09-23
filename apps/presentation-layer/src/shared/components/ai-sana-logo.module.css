@@ -1,0 +1,25 @@
+.logo {
+  display: block;
+  overflow: visible;
+}
+
+.letter {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :global([data-logo-trigger]):is(:hover, :focus-visible) .letter {
+    animation: letter-lift 600ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
+@keyframes letter-lift {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-12px);
+  }
+}

@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/shared/components/ui/dialog";
 import { Textarea } from "@/shared/components/ui/textarea";
+import { useAsyncAction } from "@/shared/hooks/use-async-action";
 
 export function NewTaskDialog({
   open,
@@ -18,12 +19,12 @@ export function NewTaskDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreate: (description: string) => Promise<void>;
+  onCreate: (description: string) => void | Promise<void>;
 }) {
   const [description, setDescription] = useState("");
-  const [pending, setPending] = useState(false);
+  const { pending, error, run } = useAsyncAction();
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => { if (!pending) onOpenChange(next); }}>
       <DialogContent className="p-6 sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="text-xl font-semibold">
@@ -37,17 +38,10 @@ export function NewTaskDialog({
           className="mt-2 space-y-4"
           onSubmit={async (event) => {
             event.preventDefault();
-            if (description.trim().length < 20 || pending) return;
-            setPending(true);
-            try {
-              await onCreate(description.trim());
-              setDescription("");
-              onOpenChange(false);
-            } catch {
-              // Keep the draft in the form so it can be retried.
-            } finally {
-              setPending(false);
-            }
+            if (description.trim().length < 20) return;
+            if (!await run(() => onCreate(description.trim()))) return;
+            setDescription("");
+            onOpenChange(false);
           }}
         >
           <label htmlFor="new-task-description" className="sr-only">
@@ -55,6 +49,7 @@ export function NewTaskDialog({
           </label>
           <Textarea
             id="new-task-description"
+            disabled={pending}
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             placeholder="Например, каждый вечер в нашей пекарне остаётся непроданная выпечка. Хотим понять, сколько готовить…"
@@ -63,16 +58,17 @@ export function NewTaskDialog({
             minLength={20}
             maxLength={2000}
           />
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <div className="flex items-center justify-between gap-3">
             <span className="text-[11px] text-muted-foreground">
               Черновик виден только бизнесу
             </span>
             <Button
               type="submit"
-              disabled={description.trim().length < 20 || pending}
+              disabled={pending || description.trim().length < 20}
               className="h-9"
             >
-              Создать черновик
+              {pending ? "Создаём…" : "Создать черновик"}
             </Button>
           </div>
         </form>

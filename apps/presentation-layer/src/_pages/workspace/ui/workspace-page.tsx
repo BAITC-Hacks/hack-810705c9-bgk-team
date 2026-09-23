@@ -6,6 +6,8 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type Dispatch,
+  type SetStateAction,
 } from "react";
 import {
   ArrowsExpand,
@@ -23,21 +25,22 @@ import type {
 import { toast } from "sonner";
 import {
   calculateScore,
-  getDemoData,
   TASK_FIELDS,
   type Message,
-  type Proposal,
   type Role,
   type Task,
   type TaskField,
   type WorkspaceData,
 } from "@/entities/workspace";
-import { TaskEditor, type TaskEditorDraft } from "@/features/task-editor";
+import { requestError, workspaceApi, type WorkspaceSession, type WorkspaceSnapshot } from "@/entities/workspace/api";
+import { TaskEditor, hasTaskEditorChanges, type TaskEditorDraft } from "@/features/task-editor";
 import { TaskInspector } from "@/features/task-inspector";
 import { StudentCatalog } from "@/features/student-catalog";
 import { TeamPicker } from "@/features/team-picker";
 import { Button } from "@/shared/components/ui/button";
 import { IconAction } from "@/shared/components/icon-action";
+import { ThemeToggle } from "@/shared/components/theme-toggle";
+import { AiSanaLogo } from "@/shared/components/ai-sana-logo";
 import {
   Sheet,
   SheetContent,
@@ -86,19 +89,98 @@ const FOCUS_LAYOUT: Layout = {
   "task-inspector": 0,
 };
 
-/** `initialRole` приходит из cookie демо-роли (ADR-008), чтобы оба переключателя совпадали. */
-export default function WorkspacePage({ initialRole = "business" }: { initialRole?: Role }) {
-  const [data, setData] = useState<WorkspaceData>(getDemoData);
-  const [role, setRole] = useState<Role>(initialRole);
-  const [cookieRole, setCookieRole] = useState(initialRole);
-  if (cookieRole !== initialRole) {
-    // Переключатель демо-роли в оболочке сменил cookie: подстраиваемся без сброса данных.
-    setCookieRole(initialRole);
-    setRole(initialRole);
+export default function WorkspacePage() {
+  const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [switching, setSwitching] = useState(false);
+
+  async function load() {
+    const next = await workspaceApi.load();
+    setSnapshot(next);
+    setError("");
   }
-  const [selectedId, setSelectedId] = useState("bakery-waste");
-  const [teamId, setTeamId] = useState(() => getDemoData().teams[0].id);
-  const [status, setStatus] = useState<"published" | "draft">("published");
+
+  async function retry() {
+    setLoading(true);
+    try { await load(); } catch (failure) { setError(requestError(failure)); }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => {
+    let active = true;
+    workspaceApi.load().then((next) => {
+      if (active) setSnapshot(next);
+    }).catch((failure) => {
+      if (active) setError(requestError(failure));
+    }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  async function changeSession(next: Partial<WorkspaceSession>) {
+    await workspaceApi.session(next);
+    await load();
+  }
+
+  const setData: Dispatch<SetStateAction<WorkspaceData>> = (update) => {
+    setSnapshot((current) => current ? {
+      ...current,
+      ...(typeof update === "function" ? update(current) : update),
+    } : current);
+  };
+
+  if (loading || !snapshot) return (
+    <main className="flex min-h-dvh items-center justify-center p-6">
+      <div className="absolute top-3 right-4"><ThemeToggle /></div>
+      <div className="max-w-md space-y-4 text-center" role={error ? "alert" : "status"}>
+        <h1 className="text-xl font-semibold">{loading ? "Загружаем рабочее пространство…" : "Не удалось загрузить данные"}</h1>
+        {error && <p className="text-sm text-muted-foreground">{error}</p>}
+        {!loading && <Button onClick={() => void retry()}>Попробовать снова</Button>}
+      </div>
+    </main>
+  );
+
+  if (!snapshot.tasks.length) return (
+    <main className="flex min-h-dvh items-center justify-center p-6">
+      <div className="absolute top-3 right-4"><ThemeToggle /></div>
+      <div className="max-w-lg space-y-5 text-center">
+        <h1 className="text-2xl font-semibold">{snapshot.session.role === "business" ? "Создайте первую задачу" : "Пока нет опубликованных задач"}</h1>
+        <p className="text-sm text-muted-foreground">{snapshot.session.role === "business" ? "Опишите задачу, заполните карточку и опубликуйте её для студенческих команд." : "Бизнес ещё готовит задачи. Обновите каталог позже."}</p>
+        <div className="flex justify-center gap-3">
+          {snapshot.session.role === "business" && <Button onClick={() => setShowCreate(true)}>Новая задача</Button>}
+          <Button variant="outline" disabled={switching} onClick={async () => {
+            setSwitching(true);
+            try { await changeSession({ role: snapshot.session.role === "business" ? "student" : "business" }); }
+            catch (failure) { toast.error(requestError(failure)); }
+            finally { setSwitching(false); }
+          }}>{snapshot.session.role === "business" ? "Роль студента" : "Роль бизнеса"}</Button>
+          <Button variant="outline" onClick={() => void retry()}>Обновить</Button>
+        </div>
+      </div>
+      <NewTaskDialog open={showCreate} onOpenChange={setShowCreate} onCreate={async (description) => {
+        const task = await workspaceApi.createTask(description);
+        setData((current) => ({ ...current, tasks: [task, ...current.tasks] }));
+      }} />
+      <Toaster position="bottom-center" closeButton />
+    </main>
+  );
+
+  return <WorkspaceContent data={snapshot} setData={setData} session={snapshot.session} onSessionChange={changeSession} onReload={load} />;
+}
+
+function WorkspaceContent({ data, setData, session, onSessionChange, onReload }: {
+  data: WorkspaceData;
+  setData: Dispatch<SetStateAction<WorkspaceData>>;
+  session: WorkspaceSession;
+  onSessionChange: (next: Partial<WorkspaceSession>) => Promise<void>;
+  onReload: () => Promise<void>;
+}) {
+  const role = session.role;
+  const teamId = session.teamId ?? "";
+  const [switching, setSwitching] = useState(false);
+  const [selectedId, setSelectedId] = useState(data.tasks[0].id);
+  const [status, setStatus] = useState<"published" | "draft">(data.tasks[0].status);
   const [cardOpen, setCardOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -106,9 +188,6 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
     {},
   );
   const [taskDrafts, setTaskDrafts] = useState<Record<string, Task>>({});
-  const [persistedIds, setPersistedIds] = useState<string[]>([]);
-  const [serverQuestions, setServerQuestions] = useState<Record<string, { field: TaskField; question: string }>>({});
-  const [resetGeneration, setResetGeneration] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
   const [showDemo, setShowDemo] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
@@ -130,36 +209,12 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
     getCompact,
     getServerCompact,
   );
-  useEffect(() => {
-    let active = true;
-    fetch("/api/tasks")
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Не удалось загрузить задачи");
-        return response.json() as Promise<{
-          tasks: Task[];
-          questions: Record<string, { field: TaskField; question: string }>;
-          proposals: Proposal[];
-        }>;
-      })
-      .then(({ tasks, questions, proposals }) => {
-        if (!active) return;
-        setPersistedIds(tasks.map((item) => item.id));
-        setServerQuestions(questions ?? {});
-        if (tasks[0]) setSelectedId(tasks[0].id);
-        setData((current) => ({
-          ...current,
-          tasks: [...tasks, ...current.tasks.filter((item) => !tasks.some((saved) => saved.id === item.id))],
-          proposals: [...(proposals ?? []), ...current.proposals.filter((item) => !tasks.some((task) => task.id === item.taskId))],
-        }));
-      })
-      .catch(() => {
-        // The bundled fictional tasks remain available when the local database is offline.
-      });
-    return () => { active = false; };
-  }, []);
   const canonicalTask =
     data.tasks.find((item) => item.id === selectedId) ?? data.tasks[0];
-  const hasDraftEdits = role === "business" && !!taskDrafts[canonicalTask.id];
+  const hasDraftEdits = role === "business" && (
+    !!taskDrafts[canonicalTask.id] ||
+    hasTaskEditorChanges(editorDrafts.get(canonicalTask.id), canonicalTask)
+  );
   const task =
     role === "business"
       ? (taskDrafts[canonicalTask.id] ?? canonicalTask)
@@ -167,23 +222,26 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
   const team = data.teams.find((item) => item.id === teamId) ?? data.teams[0];
   const conversationKey = task.id;
   const messages = conversations[conversationKey] ?? [];
-  const points =
-    data.proposals.filter(
-      (proposal) => proposal.teamId === teamId && proposal.milestoneConfirmed,
-    ).length * 10;
+  const points = data.proposals
+    .filter((proposal) => proposal.teamId === teamId)
+    .reduce((sum, proposal) => sum + (proposal.points ?? (proposal.milestoneConfirmed ? 10 : 0)), 0);
 
-  function changeRole(next: Role) {
-    if (next === role) return;
-    setFocusMode(false);
-    setRole(next);
-    setCardOpen(false);
-    setMobileDrawer(null);
-    setQuery("");
-    setStatus("published");
-    if (task.status !== "published")
-      setSelectedId(
-        data.tasks.find((item) => item.status === "published")?.id ?? task.id,
-      );
+  async function changeRole(next: Role) {
+    if (next === role || switching) return;
+    setSwitching(true);
+    try {
+      await onSessionChange({ role: next });
+      setFocusMode(false);
+      setCardOpen(false);
+      setMobileDrawer(null);
+      setQuery("");
+      setStatus("published");
+    } catch (failure) { toast.error(requestError(failure)); }
+    finally { setSwitching(false); }
+  }
+
+  async function changeTeam(id: string) {
+    await onSessionChange({ teamId: id });
   }
 
   function toggleFocus() {
@@ -192,10 +250,21 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
     if (focusMode) {
       panels.setLayout(previousLayout.current ?? DEFAULT_LAYOUT);
     } else {
+      focusChatIfInside("task-navigation", "task-inspector");
       previousLayout.current = panels.getLayout();
       panels.setLayout(FOCUS_LAYOUT);
     }
     setFocusMode(!focusMode);
+  }
+
+  function focusChatIfInside(...panelIds: string[]) {
+    if (
+      panelIds.some((id) =>
+        document.getElementById(id)?.contains(document.activeElement),
+      )
+    ) {
+      document.getElementById("chat-message")?.focus();
+    }
   }
 
   function toggleNavigation() {
@@ -205,7 +274,10 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
     }
     setFocusMode(false);
     if (navigationRef.current?.isCollapsed()) navigationRef.current.expand();
-    else navigationRef.current?.collapse();
+    else {
+      focusChatIfInside("task-navigation");
+      navigationRef.current?.collapse();
+    }
   }
 
   function toggleProposals() {
@@ -215,7 +287,10 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
     }
     setFocusMode(false);
     if (inspectorRef.current?.isCollapsed()) inspectorRef.current.expand();
-    else inspectorRef.current?.collapse();
+    else {
+      focusChatIfInside("task-inspector");
+      inspectorRef.current?.collapse();
+    }
   }
 
   function showProposals() {
@@ -227,6 +302,10 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
   }
 
   function openCard() {
+    if (task.canEdit === false) {
+      toast.error("Изменять карточку может только её бизнес-владелец. Выберите свою задачу.");
+      return;
+    }
     editorReturnFocus.current =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
@@ -238,13 +317,20 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
   const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
     const scope = cardOpen
       ? editorContentRef.current
-      : mobileDrawer
+      : compact && mobileDrawer
         ? mobileContentRef.current
         : null;
     if (!shouldHandleShortcut(event, scope)) return;
+    if (event.key === "Escape" && scope) {
+      event.preventDefault();
+      if (cardOpen) setCardOpen(false);
+      else setMobileDrawer(null);
+      return;
+    }
     if (role === "business" && event.altKey && !event.shiftKey) {
       if (cardOpen && event.code !== "Digit2") return;
       if (
+        compact &&
         mobileDrawer &&
         event.code !== (mobileDrawer === "tasks" ? "Digit1" : "Digit3")
       )
@@ -261,7 +347,7 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
       }
       return;
     }
-    if (cardOpen || mobileDrawer) return;
+    if (cardOpen || (compact && mobileDrawer)) return;
     if (
       role === "business" &&
       (event.ctrlKey || event.metaKey) &&
@@ -286,8 +372,8 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
     }
   });
   useEffect(() => {
-    document.addEventListener("keydown", handleShortcut);
-    return () => document.removeEventListener("keydown", handleShortcut);
+    document.addEventListener("keydown", handleShortcut, true);
+    return () => document.removeEventListener("keydown", handleShortcut, true);
   }, []);
 
   function selectTask(id: string) {
@@ -296,30 +382,12 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
     setMobileDrawer(null);
   }
 
-  async function saveTask(next: Task, verified: boolean) {
-    if (persistedIds.includes(next.id)) {
-      try {
-        const response = await fetch(`/api/tasks/${next.id}`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ task: next }),
-        });
-        if (!response.ok) throw new Error("Не удалось сохранить карточку");
-        next = (await response.json() as { task: Task }).task;
-        if (verified) {
-          const confirmed = await fetch(`/api/tasks/${next.id}/grill/checkpoint`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ block: "all", action: "confirm" }),
-          });
-          if (!confirmed.ok) throw new Error("Не удалось подтвердить сведения");
-          next = (await confirmed.json() as { task: Task }).task;
-        }
-      } catch {
-        toast.error("Не удалось сохранить карточку");
-        return;
-      }
+  async function saveTask(input: Task) {
+    if (task.canEdit === false) {
+      toast.error("Изменять карточку может только её бизнес-владелец. Выберите свою задачу.");
+      return;
     }
+    const next = await workspaceApi.saveTask(input);
     editorDrafts.delete(next.id);
     setData((current) => ({
       ...current,
@@ -342,47 +410,11 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
   }
 
   async function sendMessage(text: string, field?: TaskField, skill?: ChatSkillId) {
-    if (!skill && role === "business" && persistedIds.includes(task.id)) {
-      try {
-        const response = await fetch(`/api/tasks/${task.id}/grill/turn`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ answer: text }),
-        });
-        if (!response.ok) throw new Error("Не удалось сохранить ответ");
-        const result = await response.json() as {
-          task: Task;
-          question: { field: TaskField; question: string } | null;
-        };
-        setData((current) => ({
-          ...current,
-          tasks: current.tasks.map((item) => item.id === result.task.id ? result.task : item),
-        }));
-        setServerQuestions((current) => {
-          const updated = { ...current };
-          if (result.question) updated[task.id] = result.question;
-          else delete updated[task.id];
-          return updated;
-        });
-        setConversations((current) => ({
-          ...current,
-          [conversationKey]: [
-            ...(current[conversationKey] ?? []),
-            { id: crypto.randomUUID(), role: "user", content: text },
-            { id: crypto.randomUUID(), role: "assistant", content: result.question
-              ? `Ответ сохранён в карточке. Следующий вопрос: ${result.question.question}`
-              : "Ответ сохранён. Проверьте карточку и подтвердите сведения перед публикацией." },
-          ],
-        }));
-      } catch {
-        toast.error("Не удалось сохранить ответ. Попробуйте ещё раз.");
-      }
-      return;
-    }
     let response = "";
     if (skill) {
       response = runChatSkill(task, data.proposals, data.teams, skill, text);
     } else if (field) {
+      if (task.canEdit === false) throw new Error("Изменять карточку может только её бизнес-владелец.");
       const label = TASK_FIELDS.find((item) => item.key === field)?.label;
       const update = (item: Task): Task => ({
         ...item,
@@ -395,10 +427,11 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
           [task.id]: update(current[task.id] ?? canonicalTask),
         }));
       } else {
+        const saved = await workspaceApi.saveTask(update(task));
         setData((current) => ({
           ...current,
           tasks: current.tasks.map((item) =>
-            item.id === task.id ? update(item) : item,
+            item.id === saved.id ? saved : item,
           ),
         }));
       }
@@ -423,29 +456,21 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
     }));
   }
 
-  function resetDemo() {
-    const next = getDemoData();
-    setData((current) => ({
-      ...next,
-      tasks: [...current.tasks.filter((item) => persistedIds.includes(item.id)), ...next.tasks],
-      proposals: [...current.proposals.filter((item) => persistedIds.includes(item.taskId)), ...next.proposals],
-    }));
-    setConversations({});
-    setTaskDrafts({});
-    editorDrafts.clear();
-    setResetGeneration((current) => current + 1);
-    setShowCreate(false);
-    setRole(initialRole);
-    setSelectedId(next.tasks[0].id);
-    setTeamId(next.teams[0].id);
-    setQuery("");
-    setStatus("published");
-    setCardOpen(false);
-    setShortcutsOpen(false);
-    setShowDemo(false);
-    setFocusMode(false);
-    setMobileDrawer(null);
-    toast.success("Демонстрация начата заново");
+  async function resetDemo() {
+    if (switching) return;
+    setSwitching(true);
+    try {
+      await onReload();
+      setShowCreate(false);
+      setQuery("");
+      setCardOpen(false);
+      setShortcutsOpen(false);
+      setShowDemo(false);
+      setFocusMode(false);
+      setMobileDrawer(null);
+      toast.success("Сохранённые данные обновлены");
+    } catch (failure) { toast.error(requestError(failure)); }
+    finally { setSwitching(false); }
   }
 
   const navigation = (
@@ -481,6 +506,15 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
           </h1>
           <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
             <span className="truncate">Чат по задаче · {task.company}</span>
+            <button
+              type="button"
+              onClick={openCard}
+              className="shrink-0 font-semibold text-foreground underline-offset-4 hover:underline"
+              aria-label={`Готовность задачи: ${calculateScore(canonicalTask)} из 100. Открыть карточку`}
+              title="Готовность подтверждённой карточки"
+            >
+              {calculateScore(canonicalTask)} / 100
+            </button>
             <span className="hidden shrink-0 sm:inline">
               ·{" "}
               {hasDraftEdits
@@ -540,7 +574,6 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
         key={task.id}
         task={task}
         messages={messages}
-        currentQuestion={persistedIds.includes(task.id) ? (serverQuestions[task.id] ?? null) : undefined}
         onSend={sendMessage}
         onEdit={openCard}
         onShowProposals={showProposals}
@@ -555,132 +588,75 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
       teams={data.teams}
       proposals={data.proposals}
       activeTeamId={teamId}
-      canUndoDecision={!persistedIds.includes(task.id)}
+      canUndoDecision={false}
       onEditTask={openCard}
       onClose={toggleProposals}
-        onDecision={async (id, decision, reason) => {
-          if (persistedIds.includes(task.id)) {
-            try {
-              const response = await fetch(`/api/proposals/${id}/decision`, {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ decision: decision === "selected" ? "select" : decision === "rejected" ? "reject" : "defer", reason }),
-              });
-              if (!response.ok) throw new Error("Решение не сохранено");
-              const result = await response.json() as { proposal: Proposal };
-              setData((current) => ({
-                ...current,
-                proposals: current.proposals.map((proposal) => proposal.id === id ? result.proposal : proposal),
-              }));
-            } catch {
-              toast.error("Не удалось сохранить решение");
-            }
-            return;
-          }
-          setData((current) => ({
-            ...current,
-            proposals: current.proposals.map((proposal) =>
-              proposal.id === id ? { ...proposal, status: decision } : proposal,
-            ),
-          }));
-          toast.success(
-            decision === "selected"
-              ? "Команда выбрана"
-              : decision === "rejected"
-                ? "Предложение отклонено"
-                : "Решение отменено",
-            {
-              description:
-                decision === "selected"
-                  ? "Можно продолжить просмотр и выбрать ещё одну команду."
-                  : "Отклик остаётся в списке.",
-            },
-          );
-        }}
-        onApply={async (input) => {
-          if (persistedIds.includes(task.id)) {
-            try {
-              const response = await fetch(`/api/tasks/${task.id}/proposals`, {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ ...input, teamId }),
-              });
-              if (!response.ok) throw new Error("Отклик не сохранён");
-              const { proposal } = await response.json() as { proposal: Proposal };
-              setData((current) => ({ ...current, proposals: [...current.proposals, proposal] }));
-              toast.success("Предложение отправлено");
-            } catch {
-              toast.error("Не удалось отправить предложение");
-            }
-            return;
-          }
-          const proposal = {
-            ...input,
-            id: crypto.randomUUID(),
-            taskId: task.id,
-            teamId,
-            status: "pending" as const,
-            milestoneConfirmed: false,
-          };
-          setData((current) => ({
-            ...current,
-            proposals: [...current.proposals, proposal],
-          }));
-          toast.success("Предложение отправлено", {
-            description: "Переключитесь в роль бизнеса, чтобы увидеть отклик.",
-          });
-        }}
-        onMilestone={async (id) => {
-          if (persistedIds.includes(task.id)) {
-            const proposal = data.proposals.find((item) => item.id === id);
-            try {
-              const response = await fetch(`/api/proposals/${id}/milestone`, {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ evidenceUrl: proposal?.prototypeUrl }),
-              });
-              if (!response.ok) throw new Error("Этап не подтверждён");
-              setData((current) => ({
-                ...current,
-                proposals: current.proposals.map((item) => item.id === id ? { ...item, milestoneConfirmed: true } : item),
-              }));
-              toast.success("Этап подтверждён: +10 баллов команде");
-            } catch {
-              toast.error("Не удалось подтвердить этап");
-            }
-            return;
-          }
-          setData((current) => ({
-            ...current,
-            proposals: current.proposals.map((proposal) =>
-              proposal.id === id && proposal.status === "selected"
-                ? { ...proposal, milestoneConfirmed: true }
-                : proposal,
-            ),
-          }));
-          toast.success("Этап подтверждён: +10 баллов команде", {
-            description: "Повторное подтверждение не начисляет баллы снова.",
-          });
-        }}
+      onDecision={async (id, decision, reason) => {
+        const saved = await workspaceApi.decide(id, decision, reason);
+        setData((current) => ({
+          ...current,
+          proposals: current.proposals.map((proposal) =>
+            proposal.id === id ? saved : proposal,
+          ),
+        }));
+        toast.success(
+          decision === "selected"
+            ? "Команда выбрана"
+            : decision === "rejected"
+              ? "Предложение отклонено"
+              : "Решение отменено",
+          {
+            description:
+              decision === "selected"
+                ? "Можно продолжить просмотр и выбрать ещё одну команду."
+                : "Отклик остаётся в списке.",
+          },
+        );
+      }}
+      onSubmitMilestone={async (id, submission) => {
+        const proposal = await workspaceApi.submitMilestone(id, submission);
+        setData((current) => ({
+          ...current,
+          proposals: current.proposals.map((item) =>
+            item.id === id ? proposal : item,
+          ),
+        }));
+        toast.success("Результат этапа отправлен", {
+          description: "Баллы появятся после подтверждения бизнесом.",
+        });
+      }}
+      onMilestone={async (id) => {
+        const proposal = await workspaceApi.confirmMilestone(id);
+        setData((current) => ({
+          ...current,
+          proposals: current.proposals.map((item) =>
+            item.id === id ? proposal : item,
+          ),
+        }));
+        toast.success("Этап подтверждён: +10 баллов команде", {
+          description: "Повторное подтверждение не начисляет баллы снова.",
+        });
+      }}
     />
   );
 
   return (
     <div
-      key={resetGeneration}
       className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background"
     >
-      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b px-4 lg:px-6">
+      <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-4 sm:gap-3 lg:px-6">
         <div className="flex min-w-0 items-center gap-4">
           <button
             type="button"
             onClick={() => setShowDemo(true)}
             aria-label="О AI-Sana"
-            className="flex items-center gap-1.5 rounded focus-visible:outline-2 focus-visible:outline-primary"
+            data-logo-trigger
+            className="flex h-9 shrink-0 items-center rounded focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
           >
-            <span className="text-[23px] leading-none font-bold tracking-[-.7px]">
-              AI-Sana
-            </span>
+            <AiSanaLogo
+              aria-hidden="true"
+              className="h-auto w-20 min-[375px]:w-24 sm:w-28"
+            />
           </button>
           <span className="hidden h-5 w-px bg-border sm:block" />
           <span className="hidden items-center gap-3 text-[13px] font-medium text-muted-foreground xl:flex">
@@ -701,6 +677,7 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
               type="button"
               key={value}
               aria-pressed={role === value}
+              disabled={switching}
               onClick={() => changeRole(value)}
               className={cn(
                 "flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors sm:px-5",
@@ -714,6 +691,7 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
           ))}
         </div>
         <div className="flex items-center gap-1">
+          <ThemeToggle />
           <IconAction
             label="Горячие клавиши"
             shortcut="?"
@@ -725,15 +703,15 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
             variant="ghost"
             size="sm"
             onClick={() => setShowDemo(true)}
-            className="h-8 gap-1.5 bg-transparent px-2 text-xs font-semibold"
+            className="hidden h-8 gap-1.5 bg-transparent px-2 text-xs font-semibold min-[400px]:inline-flex"
           >
             Демо
           </Button>
           <div
-            title={role === "business" ? "Представитель бизнеса" : team.name}
+            title={role === "business" ? "Представитель бизнеса" : team?.name ?? "Студент"}
             className="hidden size-8 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-primary sm:flex"
           >
-            {role === "business" ? "Б" : team.initials}
+            {role === "business" ? "Б" : team?.initials ?? "С"}
           </div>
         </div>
       </header>
@@ -749,9 +727,10 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
               <TeamPicker
                 teams={data.teams}
                 activeTeamId={teamId}
-                onTeamChange={setTeamId}
+                onTeamChange={changeTeam}
                 points={points}
-                onTeamSave={(next) => {
+                onTeamSave={async (input) => {
+                  const next = await workspaceApi.saveTeam(input, data.teams.some((item) => item.id === input.id));
                   setData((current) => ({
                     ...current,
                     teams: current.teams.some((item) => item.id === next.id)
@@ -760,8 +739,9 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
                         )
                       : [...current.teams, next],
                   }));
-                  setTeamId(next.id);
                   toast.success("Профиль команды сохранён");
+                  try { await changeTeam(next.id); }
+                  catch (failure) { toast.error(`Профиль сохранён, но переключить команду не удалось. ${requestError(failure)}`); }
                 }}
               />
             }
@@ -786,9 +766,11 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
               maxSize="26%"
               collapsible
               collapsedSize={0}
-              onResize={(size) =>
-                setNavigationCollapsed(size.asPercentage === 0)
-              }
+              onResize={(size) => {
+                if (size.asPercentage === 0)
+                  focusChatIfInside("task-navigation");
+                setNavigationCollapsed(size.asPercentage === 0);
+              }}
               inert={focusMode || navigationCollapsed}
               aria-hidden={focusMode || navigationCollapsed || undefined}
             >
@@ -823,9 +805,11 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
               maxSize="42%"
               collapsible
               collapsedSize={0}
-              onResize={(size) =>
-                setInspectorCollapsed(size.asPercentage === 0)
-              }
+              onResize={(size) => {
+                if (size.asPercentage === 0)
+                  focusChatIfInside("task-inspector");
+                setInspectorCollapsed(size.asPercentage === 0);
+              }}
               inert={focusMode || inspectorCollapsed}
               aria-hidden={focusMode || inspectorCollapsed || undefined}
             >
@@ -841,6 +825,12 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
           ref={editorContentRef}
           showCloseButton={false}
           className="gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-[600px]"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            editorContentRef.current
+              ?.querySelector<HTMLInputElement>("input")
+              ?.focus();
+          }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             const previous = editorReturnFocus.current;
@@ -888,6 +878,13 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
           side={mobileDrawer === "tasks" ? "left" : "right"}
           showCloseButton={false}
           className="gap-0 p-0 data-[side=left]:w-full data-[side=right]:w-full data-[side=left]:sm:max-w-[380px] data-[side=right]:sm:max-w-[420px] [&_.workspace-panel]:rounded-none [&_.workspace-panel]:border-0"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            const content = mobileContentRef.current;
+            const search = content?.querySelector<HTMLInputElement>("input");
+            if (search) search.focus();
+            else content?.focus();
+          }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             document.getElementById("chat-message")?.focus();
@@ -961,19 +958,7 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
         open={showCreate}
         onOpenChange={setShowCreate}
         onCreate={async (description) => {
-          try {
-          const response = await fetch("/api/tasks", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ description }),
-          });
-          if (!response.ok) throw new Error("Не удалось создать задачу");
-          const { task: next, question } = await response.json() as {
-            task: Task;
-            question: { field: TaskField; question: string } | null;
-          };
-          setPersistedIds((current) => [...current, next.id]);
-          if (question) setServerQuestions((current) => ({ ...current, [next.id]: question }));
+          const next = await workspaceApi.createTask(description);
           setData((current) => ({
             ...current,
             tasks: [next, ...current.tasks],
@@ -984,10 +969,6 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
           toast.success("Черновик создан", {
             description: "Ответьте на вопросы или сразу откройте карточку.",
           });
-          } catch {
-            toast.error("Не удалось создать черновик. Проверьте соединение с базой данных.");
-            throw new Error("Не удалось создать черновик");
-          }
         }}
       />
       <Dialog open={showDemo} onOpenChange={setShowDemo}>
@@ -997,7 +978,7 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
               AI-Sana · демо
             </DialogTitle>
             <DialogDescription className="pt-2 leading-relaxed">
-              Это интерактивный frontend с вымышленными задачами и командами.
+              Рабочее пространство с демонстрационными задачами и командами.
               Ассистент отвечает по подготовленным сценариям.
             </DialogDescription>
           </DialogHeader>
@@ -1016,15 +997,15 @@ export default function WorkspacePage({ initialRole = "business" }: { initialRol
             ))}
           </ol>
           <p className="text-[11px] leading-relaxed text-muted-foreground">
-            Примеры задач и откликов доступны для знакомства с интерфейсом.
-            Новые задачи и ответы сохраняются в рабочей базе данных.
+            Задачи, команды, отклики и результаты этапов сохраняются в базе данных.
+            Переключатель ролей предназначен для демонстрации. Беседа с ассистентом остаётся в этой вкладке.
           </p>
-          <Button variant="outline" onClick={resetDemo} className="mt-2">
-            Начать демо заново
+          <Button variant="outline" disabled={switching} onClick={resetDemo} className="mt-2">
+            Обновить сохранённые данные
           </Button>
         </DialogContent>
       </Dialog>
-      <Toaster theme="light" position="bottom-center" closeButton />
+      <Toaster position="bottom-center" closeButton />
     </div>
   );
 }

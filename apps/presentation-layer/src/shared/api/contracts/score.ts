@@ -1,3 +1,4 @@
+import { resourceIdSchema } from "@/shared/api/contracts/resource-id";
 import { z } from "zod";
 
 // Литералы повторяют @/entities/task (shared не импортирует entities по FSD).
@@ -25,11 +26,11 @@ export const scoreNodeSchema = z.enum([
 export const levelSchema = z.enum(["draft", "working", "ready", "priority"]);
 
 export const taskScoreParamsSchema = z.object({
-  id: z.uuid(),
+  id: resourceIdSchema,
 });
 
 export const taskScoreResponseSchema = z.object({
-  taskId: z.uuid(),
+  taskId: resourceIdSchema,
   total: z.number().int().min(0).max(100),
   level: levelSchema,
   levelLabel: z.string(),

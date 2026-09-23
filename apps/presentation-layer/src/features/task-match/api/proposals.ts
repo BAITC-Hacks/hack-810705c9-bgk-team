@@ -1,7 +1,8 @@
+import type { Proposal } from '@/entities/workspace/model';
 import { desc, eq } from 'drizzle-orm';
 import { db } from '@/shared/db';
 import { proposals, stages } from '@/shared/db/schema';
-export function projectProposal(row: typeof proposals.$inferSelect, milestoneConfirmed = false) {
+export function projectProposal(row: typeof proposals.$inferSelect, milestoneConfirmed = false): Proposal {
   return { id: row.id, taskId: row.taskId, teamId: row.teamId, idea: row.solution,
     plan: row.plan, timeline: row.deadline, prototypeUrl: row.repoUrl ?? '',
     status: row.status === 'accepted' ? 'selected' : row.status === 'rejected' ? 'rejected' : 'pending', milestoneConfirmed };

@@ -17,6 +17,18 @@ export const DEMO_BUSINESSES: readonly DemoBusiness[] = [
   { id: "7b150000-0000-4000-8000-000000000003", name: "УчиЛегко", industry: "образование" },
   { id: "7b150000-0000-4000-8000-000000000004", name: "МаркетДом", industry: "ритейл" },
   { id: "7b150000-0000-4000-8000-000000000005", name: "ШопОнлайн", industry: "e-commerce" },
+  { id: "business-bakery-waste", name: "Хлеб & дело", industry: "Ритейл" },
+  { id: "business-clinic-reminders", name: "Бережно", industry: "Здоровье" },
+  { id: "business-delivery-routes", name: "Рядом Маркет", industry: "Логистика" },
+  { id: "business-greenhouse-water", name: "Зелёный круг", industry: "Агро" },
+  { id: "business-cafe-loyalty", name: "Угол", industry: "Сервисы" },
+  { id: "business-school-feedback", name: "Шаг вперёд", industry: "Образование" },
+  { id: "business-draft-flower-orders", name: "Лепесток", industry: "Ритейл" },
+  { id: "business-draft-gym-schedule", name: "Баланс", industry: "Сервисы" },
+  { id: "business-draft-workshop-stock", name: "Мастерская № 7", industry: "Производство" },
+  { id: "business-draft-museum-guide", name: "Музей города", industry: "Культура" },
+  { id: "business-draft-hotel-reviews", name: "Тихий двор", industry: "Гостеприимство" },
+  { id: "business-draft-reuse-materials", name: "Нить", industry: "Производство" },
 ];
 
 export const DEMO_TEAMS: readonly DemoTeam[] = [
@@ -25,6 +37,12 @@ export const DEMO_TEAMS: readonly DemoTeam[] = [
   { id: "7e3a0000-0000-4000-8000-000000000003", name: "PixelUX" },
   { id: "7e3a0000-0000-4000-8000-000000000004", name: "WebCraft" },
   { id: "7e3a0000-0000-4000-8000-000000000005", name: "QAstra" },
+  { id: "team-byte", name: "Byte Bakery" },
+  { id: "team-tochka", name: "Точка роста" },
+  { id: "team-data", name: "Data Folks" },
+  { id: "team-smena", name: "Смена" },
+  { id: "team-sever", name: "Север" },
+  { id: "team-sreda", name: "Среда" },
 ];
 
 export const [DEFAULT_DEMO_BUSINESS] = DEMO_BUSINESSES;

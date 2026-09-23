@@ -1,3 +1,4 @@
+import { resourceIdSchema } from "@/shared/api/contracts/resource-id";
 // ADR-006 / ADR-009: общие zod-схемы рекомендаций, каталога и свайпов.
 // Серверные запросы, route handlers и UI импортируют отсюда одни и те же типы.
 import { z } from 'zod';
@@ -21,7 +22,7 @@ export type RoleSlug = z.infer<typeof roleSchema>;
 
 /** Плитка задачи: общая для колоды, сетки и каталога (FR-5.12, FR-5.15). */
 export const taskTileSchema = z.object({
-  id: z.string().uuid(),
+  id: resourceIdSchema,
   title: z.string(),
   company: z.string(),
   topic: z.string(),
@@ -65,7 +66,7 @@ export type RecommendationsResponse = z.infer<
   typeof recommendationsResponseSchema
 >;
 
-export const teamIdParamSchema = z.object({ id: z.string().uuid() });
+export const teamIdParamSchema = z.object({ id: resourceIdSchema });
 
 export const catalogQuerySchema = z.object({
   topic: z.string().min(1).optional(),
@@ -82,13 +83,13 @@ export type CatalogResponse = z.infer<typeof catalogResponseSchema>;
 
 export const swipeRequestSchema = z.discriminatedUnion('action', [
   z.object({
-    teamId: z.string().uuid(),
-    taskId: z.string().uuid(),
+    teamId: resourceIdSchema,
+    taskId: resourceIdSchema,
     action: z.literal('skip'),
   }),
   z.object({
-    teamId: z.string().uuid(),
-    taskId: z.string().uuid(),
+    teamId: resourceIdSchema,
+    taskId: resourceIdSchema,
     action: z.literal('missing'),
     block: z.string().min(1, 'Укажите блок, которого не хватает'),
     note: z.string().max(500).optional(),

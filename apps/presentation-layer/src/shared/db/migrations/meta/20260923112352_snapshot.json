@@ -1,6 +1,6 @@
 {
-  "id": "a6cb7884-1fe6-4902-8a9d-133406e77926",
-  "prevId": "1444c1a8-0c0b-4ef7-bd51-a74a75a7c71e",
+  "id": "de2776af-808b-46ca-9de4-f404aa88d604",
+  "prevId": "123bb086-0204-4b81-b092-27ea3b14cd72",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -17,7 +17,7 @@
         },
         "task_id": {
           "name": "task_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -174,6 +174,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "''"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
         }
       },
       "indexes": {},
@@ -197,7 +204,7 @@
         },
         "task_id": {
           "name": "task_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -336,7 +343,7 @@
       "columns": {
         "task_id": {
           "name": "task_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -474,7 +481,7 @@
         },
         "task_id": {
           "name": "task_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -726,13 +733,13 @@
         },
         "task_id": {
           "name": "task_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "team_id": {
           "name": "team_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -921,7 +928,7 @@
         },
         "task_id": {
           "name": "task_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -1194,13 +1201,13 @@
         },
         "team_id": {
           "name": "team_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "task_id": {
           "name": "task_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -1282,10 +1289,22 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": true,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
           "notNull": true,
-          "default": "gen_random_uuid()"
+          "default": 1
+        },
+        "legacy_workspace": {
+          "name": "legacy_workspace",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         },
         "title": {
           "name": "title",
@@ -1324,14 +1343,14 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'Моя компания'"
+          "default": "'\u041c\u043e\u044f \u043a\u043e\u043c\u043f\u0430\u043d\u0438\u044f'"
         },
         "topic": {
           "name": "topic",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'Другое'"
+          "default": "'\u0414\u0440\u0443\u0433\u043e\u0435'"
         },
         "status": {
           "name": "status",
@@ -1436,10 +1455,51 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": true,
+          "notNull": true
+        },
+        "initials": {
+          "name": "initials",
+          "type": "text",
+          "primaryKey": false,
           "notNull": true,
-          "default": "gen_random_uuid()"
+          "default": "''"
+        },
+        "tagline": {
+          "name": "tagline",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "members": {
+          "name": "members",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 3
+        },
+        "color": {
+          "name": "color",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
         },
         "name": {
           "name": "name",
@@ -1480,21 +1540,14 @@
           "type": "engagement",
           "typeSchema": "public",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "default": "'both'"
         }
       },
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "team_name_unique": {
-          "name": "team_name_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "name"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

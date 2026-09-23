@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { taskAccess, toExecutorView, visibleProposals } from '@/entities/access';
 import { requireTaskOwner } from '@/features/task-card/api/access';
@@ -129,7 +129,7 @@ export async function updateTask(taskId: string, input: unknown) {
     tagsState: parsed.tagsState ?? (parsed.neededRoles || parsed.neededSkills ? 'suggested' : row.tagsState), compensationNote: parsed.compensationNote ?? row.compensationNote,
     title: patch.title ?? row.title, company: patch.company ?? row.company,
     topic: ('industry' in patch ? patch.industry : undefined) ?? ('topic' in patch ? patch.topic : undefined) ?? row.topic,
-    updatedAt: new Date() }).where(eq(tasks.id, taskId));
+    version: sql`${tasks.version} + 1`, updatedAt: new Date() }).where(eq(tasks.id, taskId));
   await recalculateScore(tx, taskId, 'task');
   });
   for (const [key, value] of Object.entries(patch.fields ?? {})) {
@@ -148,7 +148,7 @@ export { getScore as getTaskScore } from '@/features/task-card/api/get-score';
 export async function publishTask(taskId: string) {
   await requireTaskOwner(taskId);
   await db.transaction(async tx => {
-    const [row] = await tx.update(tasks).set({ status: 'published', publishedAt: new Date(), updatedAt: new Date() }).where(and(eq(tasks.id, taskId), eq(tasks.status, 'draft'))).returning();
+    const [row] = await tx.update(tasks).set({ version: sql`${tasks.version} + 1`, status: 'published', publishedAt: new Date(), updatedAt: new Date() }).where(and(eq(tasks.id, taskId), eq(tasks.status, 'draft'))).returning();
     if (!row) throw new ApiError(409, 'INVALID_STATE', 'Задачу нельзя опубликовать');
     await tx.update(grillSessions).set({ status: 'finished', currentNode: null, currentBlock: null }).where(eq(grillSessions.taskId, taskId));
   });

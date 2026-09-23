@@ -18,6 +18,8 @@ export async function GET(
   const result = await getScore(parsed.data.id);
   if (!result) return apiError(404, "task_not_found", "Задача не найдена");
 
-  return Response.json(taskScoreResponseSchema.parse(result));
+  const validated = taskScoreResponseSchema.safeParse(result);
+  if (!validated.success) return apiError(500, "invalid_response", "Ошибка формирования рейтинга");
+  return Response.json(validated.data);
   } catch(error) { return toResponse(error); }
 }

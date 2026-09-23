@@ -30,12 +30,13 @@ import {
 import { Textarea } from "@/shared/components/ui/textarea";
 import { cn } from "@/shared/lib/utils";
 import { shouldHandleShortcut } from "@/shared/lib/keyboard-shortcuts";
+import { useAsyncAction } from "@/shared/hooks/use-async-action";
 
 export type TeamPickerProps = {
   teams: Team[];
   activeTeamId: string;
-  onTeamChange: (id: string) => void;
-  onTeamSave: (team: Team) => void;
+  onTeamChange: (id: string) => void | Promise<void>;
+  onTeamSave: (team: Team) => void | Promise<void>;
   points: number;
 };
 
@@ -101,9 +102,10 @@ export function TeamPicker({
 }: TeamPickerProps) {
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState(activeTeamId);
-  const [mode, setMode] = useState<"browse" | "create" | "edit">("browse");
+  const [mode, setMode] = useState<"browse" | "edit">("browse");
   const [draft, setDraft] = useState<TeamDraft>(EMPTY_DRAFT);
   const [error, setError] = useState("");
+  const { pending, error: saveError, run } = useAsyncAction();
   const trigger = useRef<HTMLButtonElement | null>(null);
   const dialogContent = useRef<HTMLDivElement | null>(null);
   const id = useId();
@@ -113,6 +115,7 @@ export function TeamPicker({
   const isActive = selectedTeam?.id === activeTeamId;
 
   function changeOpen(next: boolean) {
+    if (pending) return;
     if (next) {
       setSelectedId(activeTeamId);
       setMode("browse");
@@ -144,13 +147,10 @@ export function TeamPicker({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  function startForm(nextMode: "create" | "edit") {
-    setDraft(
-      nextMode === "edit" && activeTeam
-        ? draftFromTeam(activeTeam)
-        : EMPTY_DRAFT,
-    );
-    setMode(nextMode);
+  function startForm() {
+    if (!activeTeam) return;
+    setDraft(draftFromTeam(activeTeam));
+    setMode("edit");
     setError("");
   }
 
@@ -159,7 +159,7 @@ export function TeamPicker({
     setError("");
   }
 
-  function saveTeam(event: FormEvent<HTMLFormElement>) {
+  async function saveTeam(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const name = draft.name.trim();
     const members = Number(draft.members);
@@ -185,8 +185,9 @@ export function TeamPicker({
       return;
     }
 
+    if (!activeTeam) return;
     const team: Team = {
-      id: mode === "edit" && activeTeam ? activeTeam.id : crypto.randomUUID(),
+      id: activeTeam.id,
       name,
       initials: teamInitials(name),
       tagline: draft.tagline.trim(),
@@ -195,7 +196,7 @@ export function TeamPicker({
       interests,
       color: "#eeeeee",
     };
-    onTeamSave(team);
+    if (!await run(() => onTeamSave(team))) return;
     setOpen(false);
   }
 
@@ -241,11 +242,7 @@ export function TeamPicker({
       >
         <DialogHeader className="gap-2 pr-6">
           <DialogTitle className="text-xl font-bold tracking-tight">
-            {mode === "create"
-              ? "Новая команда"
-              : mode === "edit"
-                ? "Профиль команды"
-                : "Моя команда"}
+            {mode === "edit" ? "Профиль команды" : "Моя команда"}
           </DialogTitle>
           <DialogDescription>
             {mode === "browse"
@@ -253,6 +250,7 @@ export function TeamPicker({
               : "Этот профиль будет виден бизнесу вместе с вашими откликами."}
           </DialogDescription>
         </DialogHeader>
+        {saveError && <p role="alert" className="text-sm text-destructive">{saveError}</p>}
 
         {mode === "browse" ? (
           <>
@@ -316,16 +314,16 @@ export function TeamPicker({
                       <Button
                         variant="outline"
                         className="h-10 font-semibold"
-                        onClick={() => startForm("edit")}
+                        onClick={startForm}
                       >
                         Изменить профиль
                       </Button>
                     ) : (
                       <Button
                         className="h-10 font-semibold"
-                        onClick={() => {
-                          onTeamChange(selectedTeam.id);
-                          setOpen(false);
+                        disabled={pending}
+                        onClick={async () => {
+                          if (await run(() => onTeamChange(selectedTeam.id))) setOpen(false);
                         }}
                       >
                         Выбрать команду
@@ -335,18 +333,11 @@ export function TeamPicker({
                 </div>
               ) : (
                 <p className="py-4 text-sm text-muted-foreground">
-                  Создайте команду, чтобы отправлять отклики.
+                  Для отклика выберите доступную демо-команду.
                 </p>
               )}
             </div>
             <div className="flex items-center justify-between border-t pt-4">
-              <Button
-                variant="ghost"
-                className="-ml-2 font-semibold"
-                onClick={() => startForm("create")}
-              >
-                Создать команду
-              </Button>
               <Button variant="outline" className="font-semibold" onClick={() => setOpen(false)}>
                 Готово
               </Button>
@@ -354,6 +345,7 @@ export function TeamPicker({
           </>
         ) : (
           <form onSubmit={saveTeam} className="space-y-4" noValidate>
+            <fieldset disabled={pending} className="contents">
             <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
               <div className="space-y-1.5">
                 <label htmlFor={`${id}-name`} className="text-sm font-semibold">
@@ -469,11 +461,10 @@ export function TeamPicker({
                 Отмена
               </Button>
               <Button type="submit" className="font-semibold">
-                {mode === "create"
-                  ? "Создать и выбрать"
-                  : "Сохранить изменения"}
+                Сохранить изменения
               </Button>
             </div>
+            </fieldset>
           </form>
         )}
       </DialogContent>

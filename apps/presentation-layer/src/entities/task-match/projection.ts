@@ -4,7 +4,7 @@ import type { taskFields, tasks } from "@/shared/db/schema";
 type TaskRow = typeof tasks.$inferSelect;
 type FieldRow = typeof taskFields.$inferSelect;
 
-const FIELD_NODES: Record<WorkspaceField, string[]> = {
+export const FIELD_NODES: Record<WorkspaceField, string[]> = {
   context: ["context.current", "context.size"],
   need: ["context.change"],
   users: ["users.role", "users.scale"],
@@ -24,7 +24,8 @@ export function projectWorkspaceTask(task: TaskRow, rows: FieldRow[]): Workspace
   const confirmedFields: WorkspaceField[] = [];
   for (const [group, keys] of Object.entries(FIELD_NODES) as [WorkspaceField, string[]][]) {
     fields[group] = keys.map((key) => byKey.get(key)?.value?.trim()).filter(Boolean).join("\n");
-    if (keys.some((key) => byKey.get(key)?.state === "confirmed")) confirmedFields.push(group);
+    const present = keys.map(key => byKey.get(key)).filter(row => row?.value.trim());
+    if (present.length && present.every(row => row?.state === "confirmed")) confirmedFields.push(group);
   }
   return {
     id: task.id,
@@ -36,6 +37,8 @@ export function projectWorkspaceTask(task: TaskRow, rows: FieldRow[]): Workspace
     confirmedFields,
     status: task.status === "draft" ? "draft" : "published",
     score: task.score,
+    version: task.version,
+    publishedAt: task.publishedAt?.toISOString() ?? null,
     createdAt: task.createdAt.toISOString(),
   };
 }
