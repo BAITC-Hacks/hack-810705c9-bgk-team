@@ -10,6 +10,7 @@ import {
   scoreEvents,
 } from "@/shared/db/schema";
 import { ApiError } from "@/shared/api/errors";
+import { validateBusinessLogoKey } from "./business-logos";
 import {
   calculateScore,
   createTask,
@@ -27,6 +28,8 @@ import {
   type TeamInput,
   type ProposalInput,
   type MilestoneInput,
+  type OnboardingInput,
+  type BusinessProfile,
 } from "@/entities/workspace/contracts";
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -121,19 +124,72 @@ function requireTeam(session: WorkspaceSession, teamId: string) {
 export async function resolveSession(
   input: WorkspaceSession,
 ): Promise<WorkspaceSession> {
-  if (
-    input.teamId &&
-    (await db.query.teams.findFirst({ where: eq(teams.id, input.teamId) }))
-  )
-    return input;
-  const team = await db.query.teams.findFirst({
-    orderBy: [asc(teams.createdAt), asc(teams.id)],
-  });
-  return { role: input.role, teamId: team?.id ?? null };
+  const business = input.businessId
+    ? await db.query.businesses.findFirst({ where: eq(businesses.id, input.businessId) })
+    : null;
+  const team = input.teamId
+    ? await db.query.teams.findFirst({ where: eq(teams.id, input.teamId) })
+    : null;
+  return {
+    ...input,
+    businessId: business?.id ?? null,
+    // A team is a deliberate choice. A business profile must not silently
+    // select the first team and then bypass student onboarding on a role switch.
+    teamId: team?.id ?? null,
+    onboardingCompleted: input.role === "business" ? Boolean(business) : Boolean(team),
+  };
 }
 export async function validateSessionTeam(teamId: string) {
   if (!(await db.query.teams.findFirst({ where: eq(teams.id, teamId) })))
     throw new ApiError(404, "TEAM_NOT_FOUND", "Команда не найдена.");
+}
+export async function listTeams(): Promise<Team[]> {
+  return (await db.query.teams.findMany({
+    orderBy: [asc(teams.createdAt), asc(teams.id)],
+  })).map(teamDto);
+}
+export async function completeOnboarding(
+  input: OnboardingInput,
+  session: WorkspaceSession,
+): Promise<WorkspaceSession> {
+  if (input.role === "student") {
+    await validateSessionTeam(input.teamId);
+    return { ...session, role: "student", teamId: input.teamId, onboardingCompleted: true };
+  }
+  if (input.logoKey) await validateBusinessLogoKey(input.logoKey);
+  const businessId = await db.transaction(async (tx) => {
+    const existing = session.businessId
+      ? await tx.query.businesses.findFirst({ where: eq(businesses.id, session.businessId) })
+      : undefined;
+    if (existing) {
+      await tx.update(businesses).set({
+        name: input.companyName,
+        ...(input.logoKey === undefined ? {} : { logoKey: input.logoKey }),
+      }).where(eq(businesses.id, existing.id));
+      return existing.id;
+    }
+    const id = crypto.randomUUID();
+    await tx.insert(businesses).values({
+      id,
+      name: input.companyName,
+      industry: "Другое",
+      logoKey: input.logoKey ?? null,
+    });
+    return id;
+  });
+  return { ...session, role: "business", businessId, onboardingCompleted: true };
+}
+async function readBusinessProfile(
+  businessId: string | null | undefined,
+  reader: Reader,
+): Promise<BusinessProfile | null> {
+  if (!businessId) return null;
+  const business = await reader.query.businesses.findFirst({ where: eq(businesses.id, businessId) });
+  return business ? {
+    id: business.id,
+    name: business.name,
+    logoUrl: business.logoKey ? `/api/business-logos/${business.logoKey}` : null,
+  } : null;
 }
 async function readTask(id: string, reader: Reader = db): Promise<Task> {
   const row = await reader.query.tasks.findFirst({
@@ -218,6 +274,7 @@ export async function getWorkspace(session: WorkspaceSession) {
         teams: teamRows.map(teamDto),
         proposals: proposalRows.map(proposalDto),
         session,
+        business: await readBusinessProfile(session.businessId, tx),
       };
     },
     { isolationLevel: "repeatable read", accessMode: "read only" },
@@ -227,10 +284,15 @@ export async function addTask(description: string, session: WorkspaceSession) {
   requireRole(session, "business");
   const task = createTask(description);
   return db.transaction(async (tx) => {
-    const businessId = crypto.randomUUID();
-    await tx
-      .insert(businesses)
-      .values({ id: businessId, name: task.company, industry: task.industry });
+    const profile = session.businessId
+      ? await tx.query.businesses.findFirst({ where: eq(businesses.id, session.businessId) })
+      : null;
+    const businessId = profile?.id ?? crypto.randomUUID();
+    if (!profile) {
+      await tx.insert(businesses).values({
+        id: businessId, name: task.company, industry: task.industry,
+      });
+    }
     await tx
       .insert(tasks)
       .values({
@@ -314,13 +376,25 @@ export async function updateTask(
       id,
       createdAt: previous.createdAt,
     };
-    await tx
-      .update(businesses)
-      .set({ name: input.company, industry: input.industry })
-      .where(eq(businesses.id, row.businessId));
+    // Task-specific metadata edits must never rename the onboarding profile or
+    // other tasks that reference it. Detach only when those details change.
+    let businessId = row.businessId;
+    if (input.company !== previous.company || input.industry !== previous.industry) {
+      const sourceBusiness = await tx.query.businesses.findFirst({
+        where: eq(businesses.id, row.businessId),
+      });
+      businessId = crypto.randomUUID();
+      await tx.insert(businesses).values({
+        id: businessId,
+        name: input.company,
+        industry: input.industry,
+        logoKey: sourceBusiness?.logoKey ?? null,
+      });
+    }
     await tx
       .update(tasks)
       .set({
+        businessId,
         title: input.title,
         description: input.description,
         status: input.status,

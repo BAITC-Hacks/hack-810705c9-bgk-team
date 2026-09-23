@@ -3,7 +3,7 @@
   "globalEnv": [
     "NODE_ENV", "DATABASE_URL_NEXTJS", "DATABASE_URL_MASTRA",
     "RUSTFS_ENDPOINT", "RUSTFS_ACCESS_KEY", "RUSTFS_SECRET_KEY",
-    "MASTRA_API_URL", "OPENAI_API_KEY"
+    "MASTRA_API_URL", "MASTRA_CHAT_AGENT_ID", "OPENAI_API_KEY"
   ],
   "tasks": {
     "build": {
@@ -16,6 +16,7 @@
         "RUSTFS_ACCESS_KEY",
         "RUSTFS_SECRET_KEY",
         "MASTRA_API_URL",
+        "MASTRA_CHAT_AGENT_ID",
         "OPENAI_API_KEY"
       ]
     },

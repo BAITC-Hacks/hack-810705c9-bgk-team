@@ -13,7 +13,7 @@ export type ApiContext = { params: Promise<Record<string, string>> };
 
 export async function getSession(): Promise<WorkspaceSession> {
   const value = (await cookies()).get(SESSION_COOKIE)?.value;
-  let session: WorkspaceSession = { role: "business", teamId: null };
+  let session: WorkspaceSession = sessionSchema.parse({ role: "business", teamId: null });
   if (value) {
     try {
       const parsed = sessionSchema.safeParse(JSON.parse(value));
@@ -120,6 +120,7 @@ export function apiRoute(
         }
       }
       const result = await handler(request, context, await getSession());
+      if (result instanceof Response) return result;
       return NextResponse.json(result, {
         status,
         headers: { "Cache-Control": "no-store" },

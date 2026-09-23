@@ -7,9 +7,49 @@ import {
   taskUpdateSchema,
   milestoneInputSchema,
   publicTask,
+  onboardingSchema,
+  sessionSchema,
+  sessionUpdateSchema,
 } from "./contracts";
 
 describe("workspace API contracts", () => {
+  it("requires explicit onboarding for legacy role cookies", () => {
+    assert.deepEqual(sessionSchema.parse({ role: "business", teamId: null }), {
+      role: "business", teamId: null, onboardingCompleted: false, businessId: null,
+    });
+    assert.deepEqual(sessionSchema.parse({
+      role: "student", teamId: "team-one", onboardingCompleted: true, businessId: "company-one",
+    }), {
+      role: "student", teamId: "team-one", onboardingCompleted: true, businessId: "company-one",
+    });
+  });
+
+  it("requires only the selected role's onboarding fields", () => {
+    assert.deepEqual(onboardingSchema.parse({ role: "business", companyName: "  Компания  " }), {
+      role: "business", companyName: "Компания",
+    });
+    assert.equal(onboardingSchema.safeParse({ role: "student", teamId: "team-one" }).success, true);
+    for (const input of [
+      { role: "business", companyName: "   " },
+      { role: "business", companyName: "a".repeat(201) },
+      { role: "student" },
+      { role: "student", teamId: "" },
+      { role: "student", teamId: "team-one", companyName: "Unused company" },
+      { role: "business", companyName: "Company", teamId: "team-one" },
+    ]) assert.equal(onboardingSchema.safeParse(input).success, false);
+  });
+
+  it("accepts only generated image keys and blocks completion through role switching", () => {
+    const key = "12345678-1234-1234-1234-123456789abc.webp";
+    assert.equal(onboardingSchema.safeParse({ role: "business", companyName: "Компания", logoKey: key }).success, true);
+    for (const logoKey of ["../logo.png", "https://example.com/logo.png", "image.svg", "data:image/png;base64,AAAA"]) {
+      assert.equal(onboardingSchema.safeParse({ role: "business", companyName: "Компания", logoKey }).success, false);
+    }
+    assert.equal(sessionUpdateSchema.safeParse({ role: "student", teamId: "team-one" }).success, true);
+    assert.equal(sessionUpdateSchema.safeParse({ onboardingCompleted: true }).success, false);
+    assert.equal(sessionUpdateSchema.safeParse({ businessId: "another-company" }).success, false);
+  });
+
   it("returns exactly the seven weighted criteria and initial evaluation metadata", () => {
     const task = createTask("Снизить списания в небольшой пекарне");
     task.confirmedFields = ["need"];

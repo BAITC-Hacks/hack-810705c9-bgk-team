@@ -136,6 +136,8 @@ export const milestoneInputSchema = z
 export const sessionSchema = z.object({
   role: z.enum(["business", "student"]),
   teamId: idSchema.nullable(),
+  onboardingCompleted: z.boolean().optional().default(false),
+  businessId: idSchema.nullable().optional().default(null),
 });
 export const sessionUpdateSchema = z
   .object({
@@ -143,8 +145,29 @@ export const sessionUpdateSchema = z
     teamId: idSchema.optional(),
   })
   .strict();
-export type WorkspaceSession = z.infer<typeof sessionSchema>;
-export type WorkspaceSnapshot = WorkspaceData & { session: WorkspaceSession };
+export const businessLogoKeySchema = z.string().regex(
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg|webp)$/i,
+  "Загрузите логотип ещё раз.",
+);
+export const onboardingSchema = z.discriminatedUnion("role", [
+  z.object({
+    role: z.literal("business"),
+    companyName: z.string().trim().min(1, "Укажите название компании.").max(200),
+    logoKey: businessLogoKeySchema.nullable().optional(),
+  }).strict(),
+  z.object({
+    role: z.literal("student"),
+    teamId: idSchema,
+  }).strict(),
+]);
+export type OnboardingInput = z.infer<typeof onboardingSchema>;
+// Existing demo callers may omit the new fields; cookie parsing supplies defaults.
+export type WorkspaceSession = z.input<typeof sessionSchema>;
+export type BusinessProfile = { id: string; name: string; logoUrl: string | null };
+export type WorkspaceSnapshot = WorkspaceData & {
+  session: WorkspaceSession;
+  business?: BusinessProfile | null;
+};
 export type TaskUpdate = z.infer<typeof taskUpdateSchema>;
 export type TeamInput = z.infer<typeof teamInputSchema>;
 export type ProposalInput = z.infer<typeof proposalInputSchema>;

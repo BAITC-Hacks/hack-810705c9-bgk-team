@@ -52,6 +52,7 @@ export const businesses = pgTable(
     id: text("id").primaryKey(),
     name: text("name").notNull(),
     industry: text("industry").notNull(),
+    logoKey: text("logo_key"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

@@ -11,6 +11,7 @@ import {
 } from "react";
 import {
   ArrowsExpand,
+  ArrowDownToLine,
   FileText,
   Keyboard,
   LayoutSideContentLeft,
@@ -25,6 +26,8 @@ import type {
 import { toast } from "sonner";
 import {
   calculateScore,
+  getTaskSummary,
+  readiness,
   TASK_FIELDS,
   type Message,
   type Role,
@@ -34,9 +37,11 @@ import {
 } from "@/entities/workspace";
 import { requestError, workspaceApi, type WorkspaceSession, type WorkspaceSnapshot } from "@/entities/workspace/api";
 import { TaskEditor, hasTaskEditorChanges, type TaskEditorDraft } from "@/features/task-editor";
+import { TaskDocumentsPanel, TaskDocumentsProvider, useTaskDocuments } from "@/features/task-documents";
 import { TaskInspector } from "@/features/task-inspector";
 import { StudentCatalog } from "@/features/student-catalog";
 import { TeamPicker } from "@/features/team-picker";
+import { OnboardingScreen } from "@/features/onboarding";
 import { Button } from "@/shared/components/ui/button";
 import { IconAction } from "@/shared/components/icon-action";
 import { ThemeToggle } from "@/shared/components/theme-toggle";
@@ -90,6 +95,10 @@ const FOCUS_LAYOUT: Layout = {
 };
 
 export default function WorkspacePage() {
+  return <TaskDocumentsProvider><WorkspaceLoader /></TaskDocumentsProvider>;
+}
+
+function WorkspaceLoader() {
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -141,6 +150,8 @@ export default function WorkspacePage() {
     </main>
   );
 
+  if (!snapshot.session.onboardingCompleted) return <OnboardingScreen snapshot={snapshot} onComplete={load} />;
+
   if (!snapshot.tasks.length) return (
     <main className="flex min-h-dvh items-center justify-center p-6">
       <div className="absolute top-3 right-4"><ThemeToggle /></div>
@@ -170,7 +181,7 @@ export default function WorkspacePage() {
 }
 
 function WorkspaceContent({ data, setData, session, onSessionChange, onReload }: {
-  data: WorkspaceData;
+  data: WorkspaceSnapshot;
   setData: Dispatch<SetStateAction<WorkspaceData>>;
   session: WorkspaceSession;
   onSessionChange: (next: Partial<WorkspaceSession>) => Promise<void>;
@@ -182,6 +193,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
   const [selectedId, setSelectedId] = useState(data.tasks[0].id);
   const [status, setStatus] = useState<"published" | "draft">(data.tasks[0].status);
   const [cardOpen, setCardOpen] = useState(false);
+  const [documentsOpen, setDocumentsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [conversations, setConversations] = useState<Record<string, Message[]>>(
@@ -189,7 +201,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
   );
   const [taskDrafts, setTaskDrafts] = useState<Record<string, Task>>({});
   const [showCreate, setShowCreate] = useState(false);
-  const [showDemo, setShowDemo] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [navigationCollapsed, setNavigationCollapsed] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
@@ -197,8 +209,10 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
   const navigationRef = useRef<PanelImperativeHandle>(null);
   const inspectorRef = useRef<PanelImperativeHandle>(null);
   const editorContentRef = useRef<HTMLDivElement>(null);
+  const documentsContentRef = useRef<HTMLDivElement>(null);
   const mobileContentRef = useRef<HTMLDivElement>(null);
   const editorReturnFocus = useRef<HTMLElement | null>(null);
+  const documentsReturnFocus = useRef<HTMLElement | null>(null);
   const [editorDrafts] = useState(() => new Map<string, TaskEditorDraft>());
   const previousLayout = useRef<Layout | undefined>(undefined);
   const [mobileDrawer, setMobileDrawer] = useState<"tasks" | "details" | null>(
@@ -220,6 +234,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
       ? (taskDrafts[canonicalTask.id] ?? canonicalTask)
       : canonicalTask;
   const team = data.teams.find((item) => item.id === teamId) ?? data.teams[0];
+  const taskDocuments = useTaskDocuments(task.id);
   const conversationKey = task.id;
   const messages = conversations[conversationKey] ?? [];
   const points =
@@ -234,6 +249,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
       await onSessionChange({ role: next });
       setFocusMode(false);
       setCardOpen(false);
+      setDocumentsOpen(false);
       setMobileDrawer(null);
       setQuery("");
       setStatus("published");
@@ -308,23 +324,55 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
         ? document.activeElement
         : null;
     setMobileDrawer(null);
+    setDocumentsOpen(false);
     setCardOpen(true);
   }
 
+  function openDocuments() {
+    documentsReturnFocus.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setMobileDrawer(null);
+    setCardOpen(false);
+    setDocumentsOpen(true);
+  }
+
+  function downloadTaskBrief() {
+    const score = calculateScore(canonicalTask);
+    const content = [
+      "AI-Sana · Карточка задачи",
+      `Статус: ${canonicalTask.status === "published" ? "Опубликована" : "Черновик"}`,
+      `Готовность: ${score}/100 · ${readiness(score).label}`,
+      "",
+      getTaskSummary(canonicalTask),
+    ].join("\n");
+    const url = URL.createObjectURL(new Blob(["\uFEFF", content], { type: "text/plain;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${canonicalTask.title.replace(/[^\p{L}\p{N} _-]/gu, "").trim().slice(0, 80) || "Задача"}.txt`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
-    const scope = cardOpen
-      ? editorContentRef.current
+    const scope = documentsOpen
+      ? documentsContentRef.current
+      : cardOpen
+        ? editorContentRef.current
       : compact && mobileDrawer
         ? mobileContentRef.current
         : null;
     if (!shouldHandleShortcut(event, scope)) return;
     if (event.key === "Escape" && scope) {
       event.preventDefault();
-      if (cardOpen) setCardOpen(false);
+      if (documentsOpen) setDocumentsOpen(false);
+      else if (cardOpen) setCardOpen(false);
       else setMobileDrawer(null);
       return;
     }
     if (role === "business" && event.altKey && !event.shiftKey) {
+      if (documentsOpen && event.code !== "Digit4") return;
       if (cardOpen && event.code !== "Digit2") return;
       if (
         compact &&
@@ -336,6 +384,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
         Digit1: toggleNavigation,
         Digit2: () => (cardOpen ? setCardOpen(false) : openCard()),
         Digit3: toggleProposals,
+        Digit4: () => (documentsOpen ? setDocumentsOpen(false) : openDocuments()),
         ...(!compact ? { Digit0: toggleFocus } : {}),
       };
       if (actions[event.code]) {
@@ -344,7 +393,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
       }
       return;
     }
-    if (cardOpen || (compact && mobileDrawer)) return;
+    if (documentsOpen || cardOpen || (compact && mobileDrawer)) return;
     if (
       role === "business" &&
       (event.ctrlKey || event.metaKey) &&
@@ -376,6 +425,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
   function selectTask(id: string) {
     setSelectedId(id);
     setCardOpen(false);
+    setDocumentsOpen(false);
     setMobileDrawer(null);
   }
 
@@ -429,8 +479,12 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
       }
       response = `Добавила ваш ответ в поле «${label}» без изменений.\n\nОткройте карточку, проверьте текст и подтвердите сведения — после этого пересчитается рейтинг.`;
     } else {
-      response =
-        "Уточнение осталось в этой беседе. В демо-режиме выберите один из вопросов выше, чтобы записать ответ в нужное поле, или откройте «Карточку задачи».\n\nЯ не добавляю неподтверждённые факты и не публикую задачу за вас.";
+      const reply = await workspaceApi.chat(task.id, [
+        { role: "user", content: task.description },
+        ...messages.map(({ role, content }) => ({ role, content })),
+        { role: "user", content: text },
+      ]);
+      response = reply.text;
     }
     setConversations((current) => ({
       ...current,
@@ -448,7 +502,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
     }));
   }
 
-  async function resetDemo() {
+  async function refreshWorkspace() {
     if (switching) return;
     setSwitching(true);
     try {
@@ -457,7 +511,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
       setQuery("");
       setCardOpen(false);
       setShortcutsOpen(false);
-      setShowDemo(false);
+      setShowHelp(false);
       setFocusMode(false);
       setMobileDrawer(null);
       toast.success("Сохранённые данные обновлены");
@@ -569,6 +623,8 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
         onSend={sendMessage}
         onEdit={openCard}
         onShowProposals={showProposals}
+        documents={taskDocuments.documents.map(({ id, file }) => ({ id, name: file.name }))}
+        onShowDocuments={openDocuments}
         onShowShortcuts={() => setShortcutsOpen(true)}
       />
     </main>
@@ -649,7 +705,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
         <div className="flex min-w-0 items-center gap-4">
           <button
             type="button"
-            onClick={() => setShowDemo(true)}
+            onClick={() => setShowHelp(true)}
             aria-label="О AI-Sana"
             data-logo-trigger
             className="flex h-9 shrink-0 items-center rounded focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
@@ -666,7 +722,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
         </div>
         <div
           className="flex items-center rounded-full bg-muted p-1"
-          aria-label="Роль в демо"
+          aria-label="Режим работы"
         >
           {(
             [
@@ -703,16 +759,19 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setShowDemo(true)}
+            onClick={() => setShowHelp(true)}
             className="hidden h-8 gap-1.5 bg-transparent px-2 text-xs font-semibold min-[400px]:inline-flex"
           >
-            Демо
+            Помощь
           </Button>
           <div
-            title={role === "business" ? "Представитель бизнеса" : team?.name ?? "Студент"}
+            title={role === "business" ? data.business?.name ?? "Представитель бизнеса" : team?.name ?? "Студент"}
             className="hidden size-8 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-primary sm:flex"
           >
-            {role === "business" ? "Б" : team?.initials ?? "С"}
+            {role === "business" && data.business?.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={data.business.logoUrl} alt="Логотип компании" className="size-8 rounded-full object-contain" />
+            ) : role === "business" ? data.business?.name.charAt(0).toLocaleUpperCase("ru") ?? "Б" : team?.initials ?? "С"}
           </div>
         </div>
       </header>
@@ -848,13 +907,18 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
             <span className="truncate text-sm font-semibold" title={task.title}>
               {task.title}
             </span>
-            <IconAction
-              label="Закрыть карточку"
-              shortcut="Esc · Alt + 2"
-              onClick={() => setCardOpen(false)}
-            >
-              <Xmark className="size-4" />
-            </IconAction>
+            <div className="flex shrink-0 items-center gap-0.5">
+              <IconAction label="Скачать сохранённую карточку" onClick={downloadTaskBrief}>
+                <ArrowDownToLine className="size-4" />
+              </IconAction>
+              <IconAction
+                label="Закрыть карточку"
+                shortcut="Esc · Alt + 2"
+                onClick={() => setCardOpen(false)}
+              >
+                <Xmark className="size-4" />
+              </IconAction>
+            </div>
           </div>
           <div className="min-h-0 flex-1">
             <TaskEditor
@@ -864,6 +928,43 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
               draftCache={editorDrafts}
               onSave={saveTask}
               onCancel={() => setCardOpen(false)}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+      <Sheet open={documentsOpen && role === "business"} onOpenChange={setDocumentsOpen}>
+        <SheetContent
+          ref={documentsContentRef}
+          showCloseButton={false}
+          className="gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-[600px]"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            documentsContentRef.current?.querySelector<HTMLButtonElement>("button[aria-controls]")?.focus();
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const previous = documentsReturnFocus.current;
+            if (previous?.isConnected && !previous.closest("[inert]")) previous.focus();
+            else document.getElementById("chat-message")?.focus();
+          }}
+        >
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b px-5 py-3">
+            <div className="min-w-0">
+              <SheetTitle className="text-sm font-semibold">Документы задачи</SheetTitle>
+              <p className="mt-1 truncate text-xs text-muted-foreground" title={task.title}>{task.title}</p>
+            </div>
+            <IconAction label="Закрыть документы" shortcut="Esc · Alt + 4" onClick={() => setDocumentsOpen(false)}>
+              <Xmark className="size-4" />
+            </IconAction>
+          </div>
+          <SheetDescription className="sr-only">Рабочие материалы текущей задачи. Документы доступны только в этой вкладке.</SheetDescription>
+          <div className="min-h-0 flex-1 overflow-y-auto p-5">
+            <TaskDocumentsPanel
+              key={task.id}
+              documents={taskDocuments.documents}
+              error={taskDocuments.error}
+              onAdd={taskDocuments.addDocuments}
+              onRemove={taskDocuments.removeDocument}
             />
           </div>
         </SheetContent>
@@ -934,6 +1035,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
                 : []),
               ...(role === "business"
                 ? [
+                    ["Alt + 4", "Открыть / закрыть документы"],
                     ["@", "Действия ассистента в сообщении"],
                     ["↑ ↓ · Enter / Tab", "Выбрать действие из @-меню"],
                     ["Shift + Enter", "Новая строка в сообщении"],
@@ -972,22 +1074,22 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
           });
         }}
       />
-      <Dialog open={showDemo} onOpenChange={setShowDemo}>
+      <Dialog open={showHelp} onOpenChange={setShowHelp}>
         <DialogContent className="p-6 sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="text-lg font-semibold">
-              AI-Sana · демо
+              AI-Sana
             </DialogTitle>
             <DialogDescription className="pt-2 leading-relaxed">
-              Рабочее пространство с демонстрационными задачами и командами.
+              От бизнес-задачи до выбранной команды.
               Ассистент отвечает по подготовленным сценариям.
             </DialogDescription>
           </DialogHeader>
           <ol className="my-2 space-y-3 text-xs leading-relaxed">
             {[
               "Создайте задачу, ответьте на вопросы и подтвердите карточку.",
-              "Переключитесь в роль студента и предложите решение.",
-              "Вернитесь в роль бизнеса и выберите команду.",
+              "Команды находят задачи в каталоге и предлагают решения.",
+              "Сравните отклики и выберите команды, с которыми хотите работать.",
             ].map((step, index) => (
               <li key={step} className="flex gap-3">
                 <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] text-primary">
@@ -998,10 +1100,9 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
             ))}
           </ol>
           <p className="text-[11px] leading-relaxed text-muted-foreground">
-            Задачи, команды, отклики и результаты этапов сохраняются в базе данных.
-            Переключатель ролей предназначен для демонстрации. Беседа с ассистентом остаётся в этой вкладке.
+            Карточки, отклики и решения сохраняются. Переписка и прикреплённые документы доступны только в текущей вкладке.
           </p>
-          <Button variant="outline" disabled={switching} onClick={resetDemo} className="mt-2">
+          <Button variant="outline" disabled={switching} onClick={refreshWorkspace} className="mt-2">
             Обновить сохранённые данные
           </Button>
         </DialogContent>
