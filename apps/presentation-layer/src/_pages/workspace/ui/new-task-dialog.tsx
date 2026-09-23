@@ -18,9 +18,10 @@ export function NewTaskDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreate: (description: string) => void;
+  onCreate: (description: string) => Promise<void>;
 }) {
   const [description, setDescription] = useState("");
+  const [pending, setPending] = useState(false);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="p-6 sm:max-w-lg">
@@ -34,12 +35,19 @@ export function NewTaskDialog({
         </DialogHeader>
         <form
           className="mt-2 space-y-4"
-          onSubmit={(event) => {
+          onSubmit={async (event) => {
             event.preventDefault();
-            if (description.trim().length < 10) return;
-            onCreate(description.trim());
-            setDescription("");
-            onOpenChange(false);
+            if (description.trim().length < 20 || pending) return;
+            setPending(true);
+            try {
+              await onCreate(description.trim());
+              setDescription("");
+              onOpenChange(false);
+            } catch {
+              // Keep the draft in the form so it can be retried.
+            } finally {
+              setPending(false);
+            }
           }}
         >
           <label htmlFor="new-task-description" className="sr-only">
@@ -52,8 +60,8 @@ export function NewTaskDialog({
             placeholder="Например, каждый вечер в нашей пекарне остаётся непроданная выпечка. Хотим понять, сколько готовить…"
             className="min-h-36 resize-none bg-muted/40 p-3 text-sm leading-relaxed"
             required
-            minLength={10}
-            maxLength={4000}
+            minLength={20}
+            maxLength={2000}
           />
           <div className="flex items-center justify-between gap-3">
             <span className="text-[11px] text-muted-foreground">
@@ -61,7 +69,7 @@ export function NewTaskDialog({
             </span>
             <Button
               type="submit"
-              disabled={description.trim().length < 10}
+              disabled={description.trim().length < 20 || pending}
               className="h-9"
             >
               Создать черновик

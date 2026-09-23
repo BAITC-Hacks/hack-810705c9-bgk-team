@@ -21,6 +21,7 @@ export type Task = {
   confirmedFields: TaskField[];
   status: "draft" | "published";
   createdAt: string;
+  score?: number;
 };
 
 export type Team = {
@@ -144,6 +145,7 @@ function isConfirmed(task: Task, field: TaskField): boolean {
 }
 
 export function calculateScore(task: Task): number {
+  if (typeof task.score === "number") return task.score;
   return TASK_FIELDS.reduce(
     (score, field) => score + (isConfirmed(task, field.key) ? field.weight : 0),
     0,

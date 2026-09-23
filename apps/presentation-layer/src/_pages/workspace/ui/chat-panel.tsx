@@ -35,6 +35,7 @@ type Props = {
   task: Task;
   messages: Message[];
   onSend: (text: string, field?: TaskField, skill?: ChatSkillId) => void;
+  currentQuestion?: { field: TaskField; question: string } | null;
   onEdit: () => void;
   onShowProposals: () => void;
   onShowShortcuts: () => void;
@@ -63,6 +64,7 @@ type ChatOption = (typeof CHAT_OPTIONS)[number];
 export function ChatPanel({
   task,
   messages,
+  currentQuestion,
   onSend,
   onEdit,
   onShowProposals,
@@ -77,7 +79,9 @@ export function ChatPanel({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const composerRef = useRef<HTMLFormElement>(null);
   const menuId = useId();
-  const questions = suggestQuestions(task);
+  const questions = currentQuestion === undefined
+    ? suggestQuestions(task)
+    : currentQuestion ? [currentQuestion] : [];
   const score = calculateScore(task);
   const field = TASK_FIELDS.find((item) => item.key === answerField);
   const skill = CHAT_SKILLS.find((item) => item.id === selectedSkill);
@@ -139,7 +143,7 @@ export function ChatPanel({
     if (!input.trim() && !selectedSkill) return;
     onSend(
       input.trim(),
-      selectedSkill ? undefined : answerField,
+      selectedSkill ? undefined : currentQuestion === undefined ? answerField : currentQuestion?.field,
       selectedSkill,
     );
     setInput("");

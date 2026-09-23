@@ -48,7 +48,8 @@ export type TaskInspectorProps = {
   teams: Team[];
   proposals: Proposal[];
   activeTeamId: string;
-  onDecision: (id: string, status: "pending" | "selected" | "rejected") => void;
+  onDecision: (id: string, status: "pending" | "selected" | "rejected", reason?: string) => void;
+  canUndoDecision?: boolean;
   onApply: (input: ApplicationInput) => void;
   onMilestone: (id: string) => void;
   onEditTask: () => void;
@@ -150,12 +151,15 @@ function BusinessInspector({
   teams,
   proposals,
   onDecision,
+  canUndoDecision = true,
   onMilestone,
   onEditTask,
   onClose,
 }: TaskInspectorProps) {
   const [view, setView] = useState<"cards" | "list">("cards");
   const [activeProposalId, setActiveProposalId] = useState<string | null>(null);
+  const [rejectProposalId, setRejectProposalId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
   const taskProposals = proposals.filter(
     (proposal) => proposal.taskId === task.id,
   );
@@ -343,7 +347,7 @@ function BusinessInspector({
                 <Button
                   variant="outline"
                   className="h-10 px-2 text-[13px] font-semibold"
-                  onClick={() => onDecision(proposal.id, "rejected")}
+                  onClick={() => setRejectProposalId(proposal.id)}
                 >
                   Отклонить
                 </Button>
@@ -354,7 +358,7 @@ function BusinessInspector({
                   Выбрать команду
                 </Button>
               </div>
-            ) : (
+            ) : canUndoDecision ? (
               <Button
                 variant="outline"
                 className="h-10 w-full text-[13px] font-semibold"
@@ -363,7 +367,7 @@ function BusinessInspector({
                 <ArrowUturnCcwLeft className="size-4" aria-hidden="true" />
                 Отменить решение
               </Button>
-            )}
+            ) : null}
           </div>
           <div
             className="flex items-center justify-center gap-1.5"
@@ -396,6 +400,35 @@ function BusinessInspector({
           </div>
         </footer>
       ) : null}
+      <Dialog open={rejectProposalId !== null} onOpenChange={(open) => {
+        if (!open) { setRejectProposalId(null); setRejectReason(""); }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Причина отклонения</DialogTitle>
+            <DialogDescription>Команда увидит, почему отклик не подошёл.</DialogDescription>
+          </DialogHeader>
+          <Textarea
+            aria-label="Причина отклонения"
+            value={rejectReason}
+            onChange={(event) => setRejectReason(event.target.value)}
+            placeholder="Например, нужен другой опыт или план работ"
+          />
+          <DialogFooter>
+            <Button
+              disabled={!rejectReason.trim()}
+              onClick={() => {
+                if (!rejectProposalId || !rejectReason.trim()) return;
+                onDecision(rejectProposalId, "rejected", rejectReason.trim());
+                setRejectProposalId(null);
+                setRejectReason("");
+              }}
+            >
+              Отклонить отклик
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
