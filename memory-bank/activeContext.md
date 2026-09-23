@@ -10,6 +10,29 @@ Task Match: активный API — stateless analyze-text/phrase-question, с�
 
 # Active Context
 
+## 2026-09-23 — Интерактивный чат менеджера через Mastra (feedback /)
+
+Фидбек по дизайну страницы `/`: «используй mastra-клиент и сделай часть менеджера — создателя задач — интерактивной за счёт работы с apps/ai-logic-layer». Центральная панель «Чат по задаче» раньше отвечала только детерминированными локальными строками; теперь реплики ассистента генерирует живой агент Mastra, а локальные ответы стали fallback'ом (концепция — `docs/adr/011-interactive-task-manager-assistant.md`, Proposed):
+
+- **Агент** `task-manager-agent` (`apps/ai-logic-layer/src/mastra/agents/task-manager-agent.ts`, регистрация в `index.ts`): получает свежий снимок карточки (сводка полей, балл, расшифровка, отклики) + навык/текст; инструкции запрещают выдумывать факты, менять/публиковать карточку и выбирать команду; вывод plain text; `memory: sessionMemory`.
+- **BFF** `POST /api/assistant` (`app/api/assistant/route.ts` → `src/shared/api/assistant-route.ts`): zod-контракт `src/shared/api/contracts/assistant.ts` (400/422 в формате ADR-009), вызов `askTaskManagerAgent()` (`src/shared/api/mastra.ts`, `@mastra/client-js`, `MASTRA_API_URL`, таймаут 15 с через `AbortSignal`, `memory: { thread: sessionId:taskId, resource: "workspace-business" }` — **Mastra требует `resource` для memory-thread, без неё 400**).
+- **Сбой AI — не ошибка HTTP**: `200 { reply, fallbackUsed: true }` → клиент (`src/_pages/workspace/api/assistant-client.ts`, таймаут 20 с) возвращает `null` → UI показывает честное сообщение «Ассистент сейчас недоступен…». **Хардкод ответов чата вырезан полностью** (решение команды): `runChatSkill` и все локальные заглушки удалены; ветка ответа в поле — локальная мутация, но реплика ассистента тоже идёт через Mastra.
+- **UI**: `sendMessage` в `workspace-page.tsx` — async (user-реплика сразу, ответ ассистента потом, состояние `assistantPending` по ключу беседы); `chat-panel.tsx` — индикатор «печатает…», блокировка отправки, подписи «Ассистент · Mastra»; контекст строит чистая `buildAssistantContext()` (`src/entities/workspace/assistant.ts`).
+
+Проверено: `bun run check-types` (turbo, 3/3) зелёный; `bun test` в presentation-layer — 18/18 (5 новых в `src/shared/api/assistant.test.ts`: контракт 400/422-кейсы + изоляция откликов контекста); live `POST /api/assistant` → `200 fallbackUsed:false` с grounded-ответом на clarify и короткий follow-up в том же thread (memory работает); невалидный запрос → `422` с details; когда у агента не было `resource` — вживую подтверждён ветка `fallbackUsed: true`; `GET /` → 200. Lint: 27 проблем — идентично baseline до изменений (1 pre-existing error `Cannot access refs during render` в `workspace-page.tsx`, не трогал). Непроверено вживью: ветка fallback при остановленной Mastra (намеренно не останавливал dev-сервер), поведение в браузере (ручной прогон чата).
+
+Изменено: `apps/ai-logic-layer/src/mastra/{index.ts,agents/task-manager-agent.ts (новый),schemas/pipeline.ts (баг-фикс draft.optional)}`; `apps/presentation-layer/{app/api/{assistant,evaluate,grill}/route.ts, src/shared/api/{contracts/assistant,mastra,assistant-route,flow-route,assistant.test}.ts (новые), src/_pages/workspace/{api/assistant-client,ui/chat-flow,ui/chat-flow.test} (новые), src/_pages/workspace/ui/{workspace-page,chat-panel,chat-skills,chat-skills.test}.tsx/.ts, src/entities/workspace/{assistant,grill,index,model}.ts}`; `docs/adr/{011-interactive-task-manager-assistant.md (новый),README.md}`.
+
+## 2026-09-23 — Флоу «оценка → прожарка → переоценка» в чате (дополнение)
+
+Требование: сначала агент-оценщик оценивает первую идею, затем бизнес по желанию запускает воркфлоу прожарки из чата, после «правильной задачи» оценщик пересчитывает рейтинг, публикация не блокируется текущим рейтингом:
+
+- **BFF**: `POST /api/evaluate` (`flow-route.ts`) — `task-evaluator-agent`, raw JSON парсится `parseRatingReport()` (strict → core-fallback → null), `200 {report, error}` (AI-сбой не ошибка HTTP). `POST /api/grill` — discriminated union `{action:start|resume}` → `stack1-result-control` через `createRun/startAsync/resumeAsync`, таймаут 110 с, `normalizeGrillResult` раскрывает `suspendPayload["<stepId>"]` в плоский payload и отдаёт `suspended`-путь для resume.
+- **UI** (`workspace-page.tsx`): создание черновика → автооценка; @-опции «Запустить прожарку»/«Оценить задачу» (`chat-panel.tsx`); при активной прожарке весь текст чата идёт в resume (`parseRoundAnswers` — строки→вопросы по порядку, «не знаю»→dont-know; `parseTargetLanguages` — алиасы языков); success → `applyGrillPackage` (заполняет+подтверждает need/users/outcome/success/constraints) → авто-переоценка. Рейтинг: `Task.rating?` + бейдж в шапке (`RATING_LEVEL_LABELS`), публикация не зависит от rating.
+- **Баг-фикс ai-logic-layer**: `PipelineState.draft: z.unknown()` → `.optional()` — zod 4 требует presence ключа, JSON-снапшот терял `draft: undefined`, resume падал «Step input validation failed» (жизненно для suspend/resume всего воркфлоу).
+
+Проверено: `bun run check-types` 3/3, `bun test` 22/22 (новые `chat-flow.test.ts`: парсеры ответов/языков, formatRating, applyGrillPackage; `assistant.test.ts`), live: evaluate → RatingReport (score 8 draft по черновой карточке), grill start → suspended (SMART раунд, 7 вопросов), resume → следующий suspend (6 follow-up), `422` на битом входе, `GET /` → 200. Непроверено вживью: полный прогон воркфлоу до `success` и рендер флоу в браузере (дорого по LLM / ручной клик).
+
 ## 2026-09-23 — Агент оценки готовности задачи (apps/ai-logic-layer)
 
 `taskEvaluatorAgent` — отдельный чат-агент ВНЕ воркфлоу (пользователь сам присылает текст задачи), отвечает строгим markdown-отчётом на языке задачи:

@@ -247,7 +247,7 @@ export function TaskMatchFlow({
                 {grill.next?.kind === "checkpoint" ? (
                   <>
                     <p className="text-sm leading-relaxed">
-                      Проверьте сведения блока «{BLOCK_LABELS[grill.next.block] ?? grill.next.block}» и
+                      Проверьте сведения блока «{BLOCK_LABELS[grill.next.block!] ?? grill.next.block}» и
                       подтвердите их.
                     </p>
                     <Button

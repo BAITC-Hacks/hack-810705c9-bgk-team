@@ -4,6 +4,7 @@ import { taskAccess, toExecutorView, visibleProposals } from '@/entities/access'
 import { requireTaskOwner } from '@/features/task-card/api/access';
 import { recalculateScore } from '@/features/task-card/api/recalculate-score';
 import { getDemoActor } from '@/shared/api/actor';
+import type { NodeId } from '@/shared/api/contracts/common';
 import { db } from '@/shared/db';
 import { businesses, aiLogs, grillSessions, grillTurns, taskFields, tasks } from '@/shared/db/schema';
 import { analyzeText, phraseQuestion, type InferenceLog } from '@/shared/api/mastra';
@@ -128,7 +129,7 @@ export async function answerGrillTurn(taskId: string, input: unknown) {
   const analyzed = await analyzeText(analysisInput, signal);
   const classification = analyzed.ok ? {
     specificity: analyzed.nodes.find(n => n.node === node)?.specificity ?? 'vague' as const,
-    coveredNodes: analyzed.fields.map(f => f.node),
+    coveredNodes: analyzed.fields.map(f => f.node) as NodeId[],
     fields: Object.fromEntries(analyzed.fields.map(f => [f.node, { value: f.value, sourceQuote: f.source_quote }])),
   } : undefined;
   const result = await submitTurn(taskId, { ...parsed, classification }, audit('analyze-text', analysisInput, analyzed));

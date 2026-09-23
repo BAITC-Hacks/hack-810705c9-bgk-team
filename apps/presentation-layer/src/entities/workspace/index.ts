@@ -1,4 +1,15 @@
 export { getDemoData } from "./demo-data";
+export { buildAssistantContext } from "./assistant";
+export {
+  applyGrillPackage,
+  isRoundPayload,
+  isTranslatorPayload,
+  parseFinalOutput,
+  type GrillFinalOutput,
+  type GrillQuestion,
+  type RoundPayload,
+  type TranslatorPayload,
+} from "./grill";
 export { getWorkspaceTasks, workspaceIdentity } from "./task-scope";
 export { CHAT_ATTACHMENT_LIMIT, type ChatAttachment } from "./chat-contracts";
 export {
@@ -19,6 +30,7 @@ export type {
   Role,
   Task,
   TaskField,
+  TaskRating,
   Team,
   WorkspaceData,
 } from "./model";

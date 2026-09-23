@@ -201,7 +201,9 @@ export const PipelineState = z.object({
   round: z.number().int().nonnegative(),
   stageDone: z.boolean(),
   capReached: z.boolean(),
-  draft: z.unknown(),
+  /** zod 4: z.unknown() требует presence ключа — снапшот JSON теряет
+   *  `draft: undefined`, поэтому ключ обязан быть optional (resume шага). */
+  draft: z.unknown().optional(),
   /** Коммитнутые артефакты: stage → value (прошёл структурный + семантический контроль). */
   artifacts: z.partialRecord(StageId, z.unknown()),
   exitReports: z.partialRecord(StageId, ExitReport),

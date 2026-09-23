@@ -22,6 +22,7 @@ import {
   Xmark,
 } from "@gravity-ui/icons";
 import {
+  suggestQuestions,
   CHAT_ATTACHMENT_LIMIT,
   TASK_FIELDS,
   type ChatAttachment,
@@ -54,11 +55,14 @@ import { useAsyncAction } from "@/shared/hooks/use-async-action";
 type Props = {
   task: Task;
   messages: Message[];
+  pending?: boolean;
   onSend: (text: string, field?: TaskField, skill?: ChatSkillId, attachments?: ChatAttachment[]) => void | Promise<void>;
   onAddDocuments: (files: File[]) => void;
   onEdit: () => void;
   onShowProposals: () => void;
   onShowShortcuts: () => void;
+  onGrill: () => void;
+  onEvaluate: () => void;
   onShowDocuments: () => void;
 };
 
@@ -85,9 +89,32 @@ const CHAT_OPTIONS = [
     aliases: ["proposals", "отклики"],
     kind: "action" as const,
   },
+  {
+    id: "grill",
+    label: "Запустить прожарку",
+    description: "Воркфлоу: из сырой идеи собрать правильную задачу",
+    aliases: ["grill", "прожарка", "workflow"],
+    kind: "action" as const,
+  },
+  {
+    id: "evaluate",
+    label: "Оценить задачу",
+    description: "Пересчитать рейтинг агентом-оценщиком",
+    aliases: ["evaluate", "оцен", "рейтинг", "rating"],
+    kind: "action" as const,
+  },
 ];
 
-type ChatOption = (typeof CHAT_OPTIONS)[number];
+type SkillOrActionOption = (typeof CHAT_OPTIONS)[number];
+type QuestionOption = {
+  id: string;
+  label: string;
+  description: string;
+  aliases: string[];
+  kind: "question";
+  field: TaskField;
+};
+type ChatOption = SkillOrActionOption | QuestionOption;
 
 type Submit = (
   text: string,
@@ -163,15 +190,18 @@ export function ChatPanel(props: Props) {
 
 function ChatThread({
   task,
+  messages,
   onEdit,
   onShowProposals,
   onShowShortcuts,
   onShowDocuments,
   onAddDocuments,
+  onGrill,
+  onEvaluate,
   pending,
   error,
   submit,
-}: Omit<Props, "messages" | "onSend"> & { pending: boolean; error: string; submit: Submit }) {
+}: Omit<Props, "onSend"> & { pending: boolean; error: string; submit: Submit }) {
   const aui = useAui();
   const input = useAuiState((state) => state.composer.text);
   const setInput = useCallback((text: string) => aui.composer.setText(text), [aui]);
@@ -188,6 +218,20 @@ function ChatThread({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const composerRef = useRef<HTMLFormElement>(null);
   const menuId = useId();
+  // Вопросы карточки — динамические опции @-меню вместо статичного блока в чате.
+  const questionOptions: QuestionOption[] = suggestQuestions(task).map(
+    ({ field, question }) => {
+      const meta = TASK_FIELDS.find((item) => item.key === field);
+      return {
+        id: `field:${field}`,
+        label: meta?.label ?? field,
+        description: question,
+        aliases: [meta?.label ?? field, field],
+        kind: "question",
+        field,
+      };
+    },
+  );
   const analysis = analyzeTaskLocally(task);
   const { questions, pendingConfirmation } = analysis.output;
   const displayedAnalysis = simulateMalformed
@@ -202,7 +246,7 @@ function ChatThread({
     menuMode === "mention"
       ? (mention?.query.toLocaleLowerCase("ru") ?? "")
       : "";
-  const options = CHAT_OPTIONS.filter((option) =>
+  const options: ChatOption[] = [...questionOptions, ...CHAT_OPTIONS].filter((option) =>
     [option.label, ...option.aliases].some((value) =>
       value.toLocaleLowerCase("ru").includes(query),
     ),
@@ -250,8 +294,16 @@ function ChatThread({
     setMenuMode(null);
     if (option.kind === "action") {
       if (option.id === "card") onEdit();
+      else if (option.id === "grill") onGrill();
+      else if (option.id === "evaluate") onEvaluate();
       else if (option.id === "documents") onShowDocuments();
       else onShowProposals();
+      return;
+    }
+    if (option.kind === "question") {
+      setAnswerField(option.field);
+      setSelectedSkill(undefined);
+      requestAnimationFrame(() => inputRef.current?.focus());
       return;
     }
     setSelectedSkill(option.id);
@@ -302,6 +354,33 @@ function ChatThread({
               {task.description}
             </div>
           </div>
+          {messages.length === 0 && !pending && (
+            <div className="max-w-[92%] rounded-xl border border-dashed bg-muted/40 px-4 py-3.5 text-sm leading-relaxed text-muted-foreground">
+              Напишите сообщение — ответит AI-Sana (ответы идут через Mastra по
+              данным карточки). Команды и навыки запускаются через{" "}
+              <kbd className="rounded border bg-background px-1.5 py-0.5 text-xs font-medium text-foreground">
+                @
+              </kbd>
+              : «Запустить прожарку», «Оценить задачу», «Открыть карточку» и
+              вопросы по заполнению карточки.
+              <div className="mt-2.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setMenuMode("manual");
+                    setActiveOption(0);
+                    inputRef.current?.focus();
+                  }}
+                  className="h-8 gap-1.5 rounded-lg px-2.5 text-xs"
+                >
+                  <At className="size-3.5" />
+                  Показать команды
+                </Button>
+              </div>
+            </div>
+          )}
           <div className="flex items-start gap-3">
             <AssistantAvatar />
             <div className="min-w-0 flex-1">
@@ -495,7 +574,7 @@ function ChatThread({
                         className="flex size-7 shrink-0 items-center justify-center text-muted-foreground"
                         aria-hidden="true"
                       >
-                        {option.kind === "skill" ? (
+                        {option.kind === "skill" || option.kind === "question" ? (
                           <At className="size-4" />
                         ) : option.id === "documents" ? (
                           <Paperclip className="size-4" />
@@ -753,7 +832,7 @@ function ChatThread({
           </div>
         </ComposerPrimitive.Root>
         <p className="mt-2 text-center text-[11px] leading-normal text-muted-foreground">
-          Проверьте и подтвердите карточку перед публикацией.
+          Ответы ИИ по данным карточки. Проверьте и подтвердите карточку перед публикацией.
         </p>
       </div>
     </ThreadPrimitive.Root>

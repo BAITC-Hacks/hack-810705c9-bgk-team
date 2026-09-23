@@ -12,6 +12,13 @@ export type TaskField =
   | "contact"
   | "interaction";
 
+export type TaskRating = {
+  score: number;
+  level: "draft" | "working" | "ready" | "priority";
+  verdict: string;
+  evaluatedAt: string;
+};
+
 export type Task = {
   id: string;
   title: string;
@@ -22,6 +29,8 @@ export type Task = {
   confirmedFields: TaskField[];
   status: "draft" | "published";
   createdAt: string;
+  /** Рейтинг агента-оценщика (task-evaluator-agent); публикация не блокируется. */
+  rating?: TaskRating;
   score?: number;
   canEdit?: boolean;
   publishedAt?: string | null;
