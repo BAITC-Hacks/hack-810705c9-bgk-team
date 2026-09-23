@@ -1,1 +1,1 @@
-export { default } from '@/_pages/home';
+export { default } from "@/_pages/workspace";

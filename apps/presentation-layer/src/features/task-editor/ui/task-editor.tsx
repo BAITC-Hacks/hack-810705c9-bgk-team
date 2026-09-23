@@ -1,0 +1,551 @@
+"use client";
+
+import { useId, useRef, useState, type FormEvent } from "react";
+import { ArrowUpRight, Check, ChevronDown, Info, Save } from "lucide-react";
+import {
+  TASK_FIELDS,
+  calculateScore,
+  readiness,
+  scoreBreakdown,
+  type Task,
+  type TaskField,
+} from "@/entities/workspace";
+import { Button } from "@/shared/components/ui/button";
+import { Checkbox } from "@/shared/components/ui/checkbox";
+import { Input } from "@/shared/components/ui/input";
+import { Progress } from "@/shared/components/ui/progress";
+import { Textarea } from "@/shared/components/ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/shared/components/ui/tooltip";
+import { cn } from "@/shared/lib/utils";
+
+type TaskEditorProps = {
+  task: Task;
+  savedTask?: Task;
+  onSave: (task: Task) => void;
+  onCancel?: () => void;
+};
+
+type EditorErrors = { title?: string; need?: string; confirmation?: string };
+
+function nonemptyFields(task: Task): TaskField[] {
+  return TASK_FIELDS.filter((field) => task.fields[field.key].trim()).map(
+    (field) => field.key,
+  );
+}
+
+function isFullyConfirmed(task: Task): boolean {
+  const filled = nonemptyFields(task);
+  return (
+    filled.length > 0 &&
+    filled.every((key) => task.confirmedFields.includes(key))
+  );
+}
+
+// Assistant answers can arrive while this form is open. Keep local edits and
+// accept incoming values only where the user has not changed the previous value.
+function mergeTask(previous: Task, draft: Task, incoming: Task): Task {
+  if (incoming.id !== previous.id) return incoming;
+  return {
+    ...incoming,
+    title: draft.title === previous.title ? incoming.title : draft.title,
+    company:
+      draft.company === previous.company ? incoming.company : draft.company,
+    industry:
+      draft.industry === previous.industry ? incoming.industry : draft.industry,
+    fields: Object.fromEntries(
+      TASK_FIELDS.map(({ key }) => [
+        key,
+        draft.fields[key] === previous.fields[key]
+          ? incoming.fields[key]
+          : draft.fields[key],
+      ]),
+    ) as Record<TaskField, string>,
+  };
+}
+
+function sameText(first: Task, second: Task): boolean {
+  return (
+    first.title === second.title &&
+    first.company === second.company &&
+    first.industry === second.industry &&
+    TASK_FIELDS.every(({ key }) => first.fields[key] === second.fields[key])
+  );
+}
+
+export function TaskEditor({
+  task,
+  savedTask = task,
+  onSave,
+  onCancel,
+}: TaskEditorProps) {
+  const id = useId();
+  const titleRef = useRef<HTMLInputElement>(null);
+  const needRef = useRef<HTMLTextAreaElement>(null);
+  const confirmationRef = useRef<HTMLButtonElement>(null);
+  const [editor, setEditor] = useState(() => ({
+    source: task,
+    draft: task,
+    verified: isFullyConfirmed(task),
+  }));
+  const [errors, setErrors] = useState<EditorErrors>({});
+
+  if (editor.source !== task) {
+    const draft = mergeTask(editor.source, editor.draft, task);
+    setEditor({
+      source: task,
+      draft,
+      verified: sameText(draft, task) && isFullyConfirmed(task),
+    });
+  }
+
+  const { draft, verified } = editor;
+  const candidate: Task = {
+    ...draft,
+    confirmedFields: verified
+      ? nonemptyFields(draft)
+      : task.confirmedFields.filter(
+          (key) =>
+            draft.fields[key].trim() && draft.fields[key] === task.fields[key],
+        ),
+  };
+  const savedScore = calculateScore(savedTask);
+  const previewScore = calculateScore(candidate);
+  const savedReadiness = readiness(savedScore);
+  const isPublished = task.status === "published";
+  const changed = !sameText(draft, savedTask) || previewScore !== savedScore;
+  const breakdown = scoreBreakdown(savedTask);
+  const previewBreakdown = scoreBreakdown(candidate);
+
+  function updateDetails(key: "title" | "company" | "industry", value: string) {
+    setEditor((current) => ({
+      ...current,
+      draft: { ...current.draft, [key]: value },
+      verified: false,
+    }));
+    setErrors((current) => ({
+      ...current,
+      [key]: undefined,
+      confirmation: undefined,
+    }));
+  }
+
+  function updateField(key: TaskField, value: string) {
+    setEditor((current) => ({
+      ...current,
+      draft: {
+        ...current.draft,
+        fields: { ...current.draft.fields, [key]: value },
+      },
+      verified: false,
+    }));
+    setErrors((current) => ({
+      ...current,
+      need: key === "need" || key === "context" ? undefined : current.need,
+      confirmation: undefined,
+    }));
+  }
+
+  function save(publish: boolean) {
+    const nextErrors: EditorErrors = {};
+    if (!draft.title.trim()) nextErrors.title = "Добавьте название задачи.";
+    if (!draft.fields.need.trim() && !draft.fields.context.trim()) {
+      nextErrors.need = "Опишите хотя бы проблему или контекст бизнеса.";
+    }
+    if ((publish || isPublished) && !verified) {
+      nextErrors.confirmation = isPublished
+        ? "Перед сохранением опубликованной карточки подтвердите, что вы проверили текст."
+        : "Перед публикацией подтвердите, что вы проверили текст.";
+    }
+    setErrors(nextErrors);
+    if (nextErrors.title) {
+      titleRef.current?.focus();
+      return;
+    }
+    if (nextErrors.need) {
+      needRef.current?.focus();
+      return;
+    }
+    if (nextErrors.confirmation) {
+      confirmationRef.current?.focus();
+      return;
+    }
+    const nextTask: Task = {
+      ...candidate,
+      title: draft.title.trim(),
+      company: draft.company.trim(),
+      industry: draft.industry.trim(),
+      fields: Object.fromEntries(
+        TASK_FIELDS.map(({ key }) => [key, draft.fields[key].trim()]),
+      ) as Record<TaskField, string>,
+      status: publish ? "published" : draft.status,
+    };
+    setEditor((current) => ({
+      ...current,
+      draft: nextTask,
+      verified: isFullyConfirmed(nextTask),
+    }));
+    onSave(nextTask);
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    save(false);
+  }
+
+  return (
+    <form
+      className="flex h-full min-h-0 flex-col overflow-y-auto bg-white"
+      onSubmit={handleSubmit}
+      noValidate
+      aria-label="Редактор карточки задачи"
+    >
+      <div className="space-y-7 px-5 py-5 sm:px-7">
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-base font-semibold tracking-tight text-[#222134]">
+              Карточка задачи
+            </h2>
+            <span className="text-xs text-[#92909e]">
+              {changed ? "Есть изменения" : "Сохранено"}
+            </span>
+          </div>
+          <p className="mt-1.5 text-sm leading-relaxed text-[#858391]">
+            Заполните то, что знаете. Пропуски не мешают публикации.
+          </p>
+        </div>
+
+        <section
+          className="rounded-xl border border-[#e8e6f0] p-4"
+          aria-label="Готовность задачи"
+        >
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-1.5">
+              <h3 className="text-sm font-medium text-[#343145]">
+                Сохранённая готовность
+              </h3>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="Как считается готовность"
+                      className="rounded-full p-1 text-[#92909e] outline-none focus-visible:ring-2 focus-visible:ring-[#7461cd]"
+                    >
+                      <Info className="size-3.5" aria-hidden="true" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-64 text-xs leading-relaxed">
+                    Баллы начисляются только за заполненные и подтверждённые
+                    вами поля. Оценка не ограничивает публикацию.
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+            <div className="shrink-0 text-sm tabular-nums text-[#92909e]">
+              <strong className="text-lg font-semibold text-[#7461cd]">
+                {savedScore}
+              </strong>{" "}
+              / 100
+            </div>
+          </div>
+          <Progress
+            value={savedScore}
+            aria-label={`Сохранённая готовность: ${savedScore} из 100`}
+            className="mt-3 h-1.5 bg-[#eeecf4] [&_[data-slot=progress-indicator]]:bg-[#7461cd]"
+          />
+          <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span
+              className={cn(
+                savedReadiness.tone === "green"
+                  ? "text-emerald-700"
+                  : savedReadiness.tone === "amber"
+                    ? "text-amber-700"
+                    : savedReadiness.tone === "violet"
+                      ? "text-[#7461cd]"
+                      : "text-[#858391]",
+              )}
+            >
+              {savedReadiness.label}
+            </span>
+            {changed ? (
+              <span className="text-[#858391]">
+                {isPublished && !verified ? "Предпросмотр" : "После сохранения"}
+                :{" "}
+                <strong className="font-medium text-[#343145]">
+                  {previewScore} / 100
+                </strong>
+              </span>
+            ) : null}
+          </div>
+          <details className="group mt-4 border-t border-[#eeecf3] pt-3">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-sm text-xs font-medium text-[#7461cd] outline-none focus-visible:ring-2 focus-visible:ring-[#7461cd] [&::-webkit-details-marker]:hidden">
+              Из чего складывается оценка
+              <ChevronDown
+                className="size-3.5 transition-transform group-open:rotate-180"
+                aria-hidden="true"
+              />
+            </summary>
+            <div className="mt-4 space-y-3">
+              {breakdown.map((group, index) => (
+                <div key={group.label}>
+                  <div className="flex items-center justify-between gap-4 text-xs">
+                    <span className="text-[#595667]">{group.label}</span>
+                    <span className="shrink-0 tabular-nums text-[#858391]">
+                      {group.earned} / {group.max}
+                      {changed &&
+                      previewBreakdown[index].earned !== group.earned ? (
+                        <span className="ml-2 text-[#7461cd]">
+                          → {previewBreakdown[index].earned}
+                        </span>
+                      ) : null}
+                    </span>
+                  </div>
+                  {group.missing.length ? (
+                    <p className="mt-1 text-[11px] leading-relaxed text-[#9995a4]">
+                      Не подтверждено:{" "}
+                      {group.missing
+                        .map((key) =>
+                          TASK_FIELDS.find(
+                            (field) => field.key === key,
+                          )?.label.toLowerCase(),
+                        )
+                        .join(", ")}
+                      .
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+              <p className="border-t border-[#eeecf3] pt-3 text-[11px] leading-relaxed text-[#858391]">
+                Оценка показывает полноту карточки. Даже с низкой оценкой задачу
+                можно опубликовать и уточнить вместе с командой.
+              </p>
+            </div>
+          </details>
+        </section>
+
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label
+              htmlFor={`${id}-title`}
+              className="text-xs font-medium text-[#595667]"
+            >
+              Название задачи{" "}
+              <span className="text-[#7461cd]" aria-hidden="true">
+                *
+              </span>
+            </label>
+            <Input
+              ref={titleRef}
+              id={`${id}-title`}
+              value={draft.title}
+              onChange={(event) => updateDetails("title", event.target.value)}
+              placeholder="Какую задачу нужно решить?"
+              required
+              aria-invalid={Boolean(errors.title)}
+              aria-describedby={errors.title ? `${id}-title-error` : undefined}
+              className="h-10 border-[#e6e3ed] text-sm"
+            />
+            {errors.title ? (
+              <p
+                id={`${id}-title-error`}
+                role="alert"
+                className="text-xs text-red-600"
+              >
+                {errors.title}
+              </p>
+            ) : null}
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <label
+                htmlFor={`${id}-company`}
+                className="text-xs font-medium text-[#595667]"
+              >
+                Компания
+              </label>
+              <Input
+                id={`${id}-company`}
+                value={draft.company}
+                onChange={(event) =>
+                  updateDetails("company", event.target.value)
+                }
+                placeholder="Название компании"
+                className="h-10 border-[#e6e3ed] text-sm"
+              />
+            </div>
+            <div className="space-y-2">
+              <label
+                htmlFor={`${id}-industry`}
+                className="text-xs font-medium text-[#595667]"
+              >
+                Отрасль
+              </label>
+              <Input
+                id={`${id}-industry`}
+                value={draft.industry}
+                onChange={(event) =>
+                  updateDetails("industry", event.target.value)
+                }
+                placeholder="Например, ритейл"
+                className="h-10 border-[#e6e3ed] text-sm"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-5 border-t border-[#eeecf3] pt-5">
+          {TASK_FIELDS.map((field, index) => {
+            const filled = Boolean(draft.fields[field.key].trim());
+            const confirmed =
+              filled && candidate.confirmedFields.includes(field.key);
+            const invalid =
+              Boolean(errors.need) &&
+              (field.key === "need" || field.key === "context");
+            return (
+              <div key={field.key} className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <label
+                    htmlFor={`${id}-${field.key}`}
+                    className="text-sm font-medium text-[#343145]"
+                  >
+                    <span
+                      className="mr-2.5 text-[11px] font-normal tabular-nums text-[#b1acbf]"
+                      aria-hidden="true"
+                    >
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    {field.label}
+                  </label>
+                  <span
+                    className={cn(
+                      "flex shrink-0 items-center gap-1 text-[11px] tabular-nums",
+                      confirmed ? "text-[#7461cd]" : "text-[#a6a0b3]",
+                    )}
+                  >
+                    {confirmed ? (
+                      <Check className="size-3" aria-hidden="true" />
+                    ) : null}
+                    {confirmed ? field.weight : 0} / {field.weight}
+                  </span>
+                </div>
+                <Textarea
+                  id={`${id}-${field.key}`}
+                  ref={field.key === "need" ? needRef : undefined}
+                  value={draft.fields[field.key]}
+                  onChange={(event) =>
+                    updateField(field.key, event.target.value)
+                  }
+                  placeholder={field.placeholder}
+                  rows={field.key === "need" || field.key === "context" ? 3 : 2}
+                  aria-invalid={invalid}
+                  aria-describedby={invalid ? `${id}-need-error` : undefined}
+                  className="min-h-20 resize-y border-[#e6e3ed] text-sm leading-relaxed placeholder:text-[#aaa5b4]"
+                />
+                {field.key === "need" && errors.need ? (
+                  <p
+                    id={`${id}-need-error`}
+                    role="alert"
+                    className="text-xs text-red-600"
+                  >
+                    {errors.need}
+                  </p>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex items-start gap-3 rounded-xl bg-[#f7f5fc] p-4">
+          <Checkbox
+            ref={confirmationRef}
+            id={`${id}-verified`}
+            checked={verified}
+            onCheckedChange={(checked) => {
+              setEditor((current) => ({
+                ...current,
+                verified: checked === true,
+              }));
+              setErrors((current) => ({ ...current, confirmation: undefined }));
+            }}
+            aria-invalid={Boolean(errors.confirmation)}
+            aria-describedby={`${id}-confirmation-hint${errors.confirmation ? ` ${id}-confirmation-error` : ""}`}
+            className="mt-0.5 data-[state=checked]:border-[#7461cd] data-[state=checked]:bg-[#7461cd] data-[state=checked]:text-white"
+          />
+          <div>
+            <label
+              htmlFor={`${id}-verified`}
+              className="cursor-pointer text-sm font-medium leading-relaxed text-[#343145]"
+            >
+              Я проверил(а) текст карточки и подтверждаю заполненные поля
+            </label>
+            <p
+              id={`${id}-confirmation-hint`}
+              className="mt-1.5 text-xs leading-relaxed text-[#858391]"
+            >
+              {verified
+                ? "Подтверждённые поля будут учтены в оценке после сохранения."
+                : isPublished
+                  ? "Проверьте текст перед сохранением. Изменения опубликованной карточки станут видны командам только после подтверждения."
+                  : "Изменённые поля получат баллы после вашей проверки. Ранее подтверждённые поля сохраняют оценку."}
+            </p>
+            {errors.confirmation ? (
+              <p
+                id={`${id}-confirmation-error`}
+                role="alert"
+                className="mt-2 text-xs text-red-600"
+              >
+                {errors.confirmation}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <footer className="sticky bottom-0 z-10 mt-auto flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-[#eae7f1] bg-white/95 px-5 py-4 backdrop-blur-sm sm:px-7">
+        {onCancel ? (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={onCancel}
+            className="mr-auto text-xs text-[#858391]"
+          >
+            Отмена
+          </Button>
+        ) : null}
+        {isPublished ? (
+          <Button
+            type="submit"
+            className="h-9 bg-[#7461cd] px-3 text-xs text-white hover:bg-[#6552bd]"
+          >
+            <Check className="size-3.5" aria-hidden="true" />
+            Подтвердить изменения
+          </Button>
+        ) : (
+          <>
+            <Button
+              type="submit"
+              variant="outline"
+              className="h-9 border-[#e6e3ed] px-3 text-xs text-[#595667]"
+            >
+              <Save className="size-3.5" aria-hidden="true" />
+              Сохранить карточку
+            </Button>
+            <Button
+              type="button"
+              onClick={() => save(true)}
+              className="h-9 bg-[#7461cd] px-3 text-xs text-white hover:bg-[#6552bd]"
+            >
+              Подтвердить и опубликовать
+              <ArrowUpRight className="size-3.5" aria-hidden="true" />
+            </Button>
+          </>
+        )}
+      </footer>
+    </form>
+  );
+}
