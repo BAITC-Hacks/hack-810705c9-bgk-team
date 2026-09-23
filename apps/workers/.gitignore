@@ -1,0 +1,5 @@
+
+# Team environment templates
+.env
+.env.*
+!.env.example

@@ -1,0 +1,108 @@
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.2-pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  rustfs:
+    image: rustfs/rustfs:1.0.0
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+    volumes:
+      - rustfs_prod_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  presentation-layer:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: apps/presentation-layer/Dockerfile
+      target: runner
+    environment:
+      DATABASE_URL_NEXTJS: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${DB_NAME_NEXTJS}
+      DATABASE_URL_MASTRA: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${DB_NAME_MASTRA}
+      MASTRA_API_URL: http://ai-logic-layer:4111
+      RUSTFS_ENDPOINT: http://rustfs:9000
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+
+  ai-logic-layer:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: apps/ai-logic-layer/Dockerfile
+      target: runner
+    environment:
+      DATABASE_URL_MASTRA: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${DB_NAME_MASTRA}
+      RUSTFS_ENDPOINT: http://rustfs:9000
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "4111:4111"
+
+  workers:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: apps/workers/Dockerfile
+      target: runner
+    environment:
+      DATABASE_URL_MASTRA: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${DB_NAME_MASTRA}
+      MASTRA_API_URL: http://ai-logic-layer:4111
+      RUSTFS_ENDPOINT: http://rustfs:9000
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-logic-layer:
+        condition: service_started
+
+  # Одноразовый сервис миграций (профиль tools, в `up` не попадает):
+  #   docker compose -f docker-compose.prod.yml --profile tools run --rm migrate
+  # Запускается внутри compose-сети, хостовый репозиторий не монтируется.
+  migrate:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: apps/presentation-layer/Dockerfile
+      target: migrator
+    environment:
+      DATABASE_URL_NEXTJS: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${DB_NAME_NEXTJS}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_prod_data:
+  rustfs_prod_data:

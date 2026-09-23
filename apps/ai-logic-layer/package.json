@@ -1,0 +1,28 @@
+{
+  "name": "ai-logic-layer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "mastra dev",
+    "build": "mastra build",
+    "start": "mastra start",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mastra/core": "latest",
+    "@mastra/pg": "^1.26.0",
+    "ai": "^6",
+    "pg": "^8.23.0",
+    "zod": "^4"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/pg": "^8.23.1",
+    "mastra": "latest",
+    "typescript": "^6"
+  }
+}

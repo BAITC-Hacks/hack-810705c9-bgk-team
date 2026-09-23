@@ -1,0 +1,11 @@
+# Search noise only; these files remain tracked and can be opened explicitly.
+skills/cc-polymath/
+.agents/skill-library/
+node_modules/
+.next/
+.mastra/
+dist/
+bun.lock
+bun.lockb
+apps/presentation-layer/src/shared/components/ui/
+apps/presentation-layer/src/shared/components/ai-elements/

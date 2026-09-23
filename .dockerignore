@@ -1,0 +1,41 @@
+# Build context hygiene: маленький контекст + никаких секретов и артефактов в образе.
+# Зависимости
+node_modules
+**/node_modules
+
+# Артефакты сборки и кеши
+.next
+**/.next
+.turbo
+**/.turbo
+.mastra
+**/.mastra
+dist
+**/dist
+
+# Git / OS
+.git
+.gitignore
+.DS_Store
+
+# Секреты и локальные env (пример оставляем — он не содержит значений)
+.env
+.env.*
+!.env.example
+
+# Docs и библиотека для агентов — в образ не нужны
+skills
+team-template
+docs
+QUICKSTART.md
+.agents
+.claude
+AGENTS.md
+CLAUDE.md
+skills-lock.json
+README.md
+
+# Логи
+*.log
+logs
+.npmrc

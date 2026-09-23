@@ -1,0 +1,33 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "NODE_ENV", "DATABASE_URL_NEXTJS", "DATABASE_URL_MASTRA",
+    "RUSTFS_ENDPOINT", "RUSTFS_ACCESS_KEY", "RUSTFS_SECRET_KEY",
+    "MASTRA_API_URL", "OPENAI_API_KEY"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**", ".mastra/**"],
+      "env": [
+        "DATABASE_URL_NEXTJS",
+        "DATABASE_URL_MASTRA",
+        "RUSTFS_ENDPOINT",
+        "RUSTFS_ACCESS_KEY",
+        "RUSTFS_SECRET_KEY",
+        "MASTRA_API_URL",
+        "OPENAI_API_KEY"
+      ]
+    },
+    "lint": {
+      "dependsOn": ["^lint"]
+    },
+    "check-types": {
+      "dependsOn": ["^check-types"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    }
+  }
+}

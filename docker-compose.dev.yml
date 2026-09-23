@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.2-pg17
+    # Креды контейнера совпадают с тем, что использует scripts/dev.sh
+    # (${POSTGRES_USER:-postgres} / ${POSTGRES_PASSWORD:-postgres}).
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+
+  rustfs:
+    image: rustfs/rustfs:1.0.0
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-rustfsadmin}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:-rustfsadmin}
+    volumes:
+      - rustfs_dev_data:/data
+
+volumes:
+  postgres_dev_data:
+  rustfs_dev_data:
