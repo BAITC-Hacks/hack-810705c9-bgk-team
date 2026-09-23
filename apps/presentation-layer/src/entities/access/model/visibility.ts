@@ -31,7 +31,7 @@ export type ExecutorTaskView<T extends AccessTask> = Omit<T, "fields" | "draftTe
 export function toExecutorView<T extends AccessTask>(task: T): ExecutorTaskView<T> {
   return {
     ...omit(task, ["fields", "draftText"]),
-    fields: task.fields
+    fields: (task.fields as T["fields"][number][])
       .filter((field) => field.state === "confirmed")
       .map((field) => omit(field, ["source", "sourceQuote", "sourceTurnId"])),
   };
