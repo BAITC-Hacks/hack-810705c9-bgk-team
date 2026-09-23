@@ -133,7 +133,7 @@ Turborepo параллельно запустит:
 
 Правила: слои могут импортировать только из нижестоящих слоёв (от верхних к нижним: `_app` / `_pages` → `features` → `entities` → `shared`; папка `app/` связывает маршруты). Внешний интерфейс слоя — только через его `index.ts`.
 
-> Детали методологии упакованы в скилл `feature-sliced-design`: чтобы он появился в `.agents/skills/`, установите скиллы — `./setup-skills.sh .` (см. раздел «Agent Skills»).
+> Детали методологии упакованы в опциональный скилл `feature-sliced-design`: `./setup-skills.sh . --extras` (см. раздел «Agent Skills»). Базовые правила FSD выше действуют и без него.
 
 ---
 
@@ -144,6 +144,10 @@ Turborepo параллельно запустит:
 в `skills/cc-polymath/` и читается только по задаче. Никакой установки после clone.
 
 Пример: «Используй hackathon-guide: оформи решение по API в docs/adr/».
+В [роутере](.agents/skills/hackathon-guide/SKILL.md) указано, какой материал читать
+для каждой задачи и в каком модуле его применять. [Каталог всех 26 скиллов](skills/cc-polymath/ROUTING.md)
+объясняет назначение каждого; [адаптация](skills/cc-polymath/PROJECT.md) связывает
+upstream-примеры со стеком проекта. `AGENTS.md` и `CLAUDE.md` направляют агентов к этим файлам.
 Коммитим `skills/`, `.agents/skills/`, `.claude/skills/`, `AGENTS.md` и `CLAUDE.md`.
 Подробнее: [QUICKSTART.md](QUICKSTART.md).
 
