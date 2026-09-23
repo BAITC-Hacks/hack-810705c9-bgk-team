@@ -1,8 +1,13 @@
-import { NextResponse } from 'next/server';
-import { claimStage } from '@/features/task-match/api/proposals';
-import { apiFailure, jsonBody } from '@/features/task-match/api/http';
+import { NextResponse } from "next/server";
+import { getDemoActor } from "@/shared/api/actor";
+import { withApi, readJson } from "@/shared/api/errors";
+import { stageClaimInput } from "@/shared/api/contracts/proposals";
+import { claimStage } from "@/features/stage-progress";
 
-export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  try { return NextResponse.json(await claimStage((await params).id, await jsonBody(request))); }
-  catch (error) { return apiFailure(error); }
-}
+export const POST = withApi(async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
+  const { id } = await params;
+  const actor = await getDemoActor();
+  const body = stageClaimInput.parse(await readJson(req));
+  const stage = await claimStage(actor, id, body);
+  return NextResponse.json(stage);
+});

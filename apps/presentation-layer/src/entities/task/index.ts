@@ -12,3 +12,6 @@ export type {
   ScoreLine,
   ScoreResult,
 } from "./model/score";
+
+export { buildKickoff } from "./model/kickoff";
+export type { BuildKickoffInput, KickoffCriterion, KickoffField } from "./model/kickoff";

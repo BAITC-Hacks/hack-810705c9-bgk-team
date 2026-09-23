@@ -1,5 +1,5 @@
 {
-  "id": "b6eb98b4-e524-4546-9840-664a4fa0749c",
+  "id": "a6cb7884-1fe6-4902-8a9d-133406e77926",
   "prevId": "1444c1a8-0c0b-4ef7-bd51-a74a75a7c71e",
   "version": "7",
   "dialect": "postgresql",
@@ -119,10 +119,10 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "ai_logs_task_id_tasks_id_fk": {
-          "name": "ai_logs_task_id_tasks_id_fk",
+        "ai_logs_task_id_task_id_fk": {
+          "name": "ai_logs_task_id_task_id_fk",
           "tableFrom": "ai_logs",
-          "tableTo": "tasks",
+          "tableTo": "task",
           "columnsFrom": [
             "task_id"
           ],
@@ -152,6 +152,38 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.business": {
+      "name": "business",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "industry": {
+          "name": "industry",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.criterion": {
       "name": "criterion",
       "schema": "",
@@ -174,6 +206,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
         },
         "metric": {
           "name": "metric",
@@ -237,10 +276,10 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "criterion_task_id_tasks_id_fk": {
-          "name": "criterion_task_id_tasks_id_fk",
+        "criterion_task_id_task_id_fk": {
+          "name": "criterion_task_id_task_id_fk",
           "tableFrom": "criterion",
-          "tableTo": "tasks",
+          "tableTo": "task",
           "columnsFrom": [
             "task_id"
           ],
@@ -287,6 +326,138 @@
         "criterion_position_range": {
           "name": "criterion_position_range",
           "value": "\"criterion\".\"position\" BETWEEN 1 AND 3"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.task_field": {
+      "name": "task_field",
+      "schema": "",
+      "columns": {
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "node": {
+          "name": "node",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "state": {
+          "name": "state",
+          "type": "grill_field_state",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'suggested'"
+        },
+        "not_applicable": {
+          "name": "not_applicable",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "na_note": {
+          "name": "na_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source": {
+          "name": "source",
+          "type": "grill_field_source",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_quote": {
+          "name": "source_quote",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_turn_id": {
+          "name": "source_turn_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "confirmed_at": {
+          "name": "confirmed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "task_field_task_id_task_id_fk": {
+          "name": "task_field_task_id_task_id_fk",
+          "tableFrom": "task_field",
+          "tableTo": "task",
+          "columnsFrom": [
+            "task_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "task_field_source_turn_id_grill_turn_id_fk": {
+          "name": "task_field_source_turn_id_grill_turn_id_fk",
+          "tableFrom": "task_field",
+          "tableTo": "grill_turn",
+          "columnsFrom": [
+            "source_turn_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "task_field_pk": {
+          "name": "task_field_pk",
+          "columns": [
+            "task_id",
+            "node"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "task_field_na_note_required": {
+          "name": "task_field_na_note_required",
+          "value": "NOT \"task_field\".\"not_applicable\" OR \"task_field\".\"na_note\" IS NOT NULL"
         }
       },
       "isRLSEnabled": false
@@ -388,10 +559,10 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "grill_session_task_id_tasks_id_fk": {
-          "name": "grill_session_task_id_tasks_id_fk",
+        "grill_session_task_id_task_id_fk": {
+          "name": "grill_session_task_id_task_id_fk",
           "tableFrom": "grill_session",
-          "tableTo": "tasks",
+          "tableTo": "task",
           "columnsFrom": [
             "task_id"
           ],
@@ -543,54 +714,106 @@
       },
       "isRLSEnabled": false
     },
-    "public.proposal_stages": {
-      "name": "proposal_stages",
+    "public.proposal": {
+      "name": "proposal",
       "schema": "",
       "columns": {
         "id": {
           "name": "id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
+          "notNull": true
         },
-        "proposal_id": {
-          "name": "proposal_id",
+        "task_id": {
+          "name": "task_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "criterion": {
-          "name": "criterion",
+        "team_id": {
+          "name": "team_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "solution": {
+          "name": "solution",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "evidence_url": {
-          "name": "evidence_url",
+        "plan": {
+          "name": "plan",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "team_roles": {
+          "name": "team_roles",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deadline": {
+          "name": "deadline",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "repo_url": {
+          "name": "repo_url",
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "criteria_answers": {
+          "name": "criteria_answers",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fit": {
+          "name": "fit",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true
         },
         "status": {
           "name": "status",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'open'"
+          "default": "'submitted'"
         },
-        "business_comment": {
-          "name": "business_comment",
+        "reject_reason": {
+          "name": "reject_reason",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "points": {
-          "name": "points",
-          "type": "integer",
+        "reject_note": {
+          "name": "reject_note",
+          "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": 0
+          "notNull": false
+        },
+        "decided_at": {
+          "name": "decided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "accepted_at": {
+          "name": "accepted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kickoff": {
+          "name": "kickoff",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -607,131 +830,82 @@
           "default": "now()"
         }
       },
-      "indexes": {},
-      "foreignKeys": {
-        "proposal_stages_proposal_id_proposals_id_fk": {
-          "name": "proposal_stages_proposal_id_proposals_id_fk",
-          "tableFrom": "proposal_stages",
-          "tableTo": "proposals",
-          "columnsFrom": [
-            "proposal_id"
+      "indexes": {
+        "proposal_active_team_task_uq": {
+          "name": "proposal_active_team_task_uq",
+          "columns": [
+            {
+              "expression": "task_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
           ],
-          "columnsTo": [
-            "id"
+          "isUnique": true,
+          "where": "\"proposal\".\"status\" in ('submitted', 'on_hold', 'accepted')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "proposal_task_idx": {
+          "name": "proposal_task_idx",
+          "columns": [
+            {
+              "expression": "task_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.proposals": {
-      "name": "proposals",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "task_id": {
-          "name": "task_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "team_id": {
-          "name": "team_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "idea": {
-          "name": "idea",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "plan": {
-          "name": "plan",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "timeline": {
-          "name": "timeline",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "prototype_url": {
-          "name": "prototype_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "fit": {
-          "name": "fit",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'submitted'"
-        },
-        "reject_reason": {
-          "name": "reject_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "decided_at": {
-          "name": "decided_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
       "foreignKeys": {
-        "proposals_task_id_tasks_id_fk": {
-          "name": "proposals_task_id_tasks_id_fk",
-          "tableFrom": "proposals",
-          "tableTo": "tasks",
+        "proposal_task_id_task_id_fk": {
+          "name": "proposal_task_id_task_id_fk",
+          "tableFrom": "proposal",
+          "tableTo": "task",
           "columnsFrom": [
             "task_id"
           ],
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "proposal_team_id_team_id_fk": {
+          "name": "proposal_team_id_team_id_fk",
+          "tableFrom": "proposal",
+          "tableTo": "team",
+          "columnsFrom": [
+            "team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "proposal_fit_range": {
+          "name": "proposal_fit_range",
+          "value": "\"proposal\".\"fit\" >= 0 and \"proposal\".\"fit\" <= 1"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.score_event": {
@@ -825,10 +999,10 @@
         }
       },
       "foreignKeys": {
-        "score_event_task_id_tasks_id_fk": {
-          "name": "score_event_task_id_tasks_id_fk",
+        "score_event_task_id_task_id_fk": {
+          "name": "score_event_task_id_task_id_fk",
           "tableFrom": "score_event",
-          "tableTo": "tasks",
+          "tableTo": "task",
           "columnsFrom": [
             "task_id"
           ],
@@ -843,6 +1017,168 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.stage": {
+      "name": "stage",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "proposal_id": {
+          "name": "proposal_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criterion_id": {
+          "name": "criterion_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criteria_version": {
+          "name": "criteria_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "metric": {
+          "name": "metric",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "threshold": {
+          "name": "threshold",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "how_to_check": {
+          "name": "how_to_check",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'open'"
+        },
+        "report_url": {
+          "name": "report_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "team_comment": {
+          "name": "team_comment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "business_comment": {
+          "name": "business_comment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "points": {
+          "name": "points",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "claimed_at": {
+          "name": "claimed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "confirmed_at": {
+          "name": "confirmed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "stage_proposal_criterion_uq": {
+          "name": "stage_proposal_criterion_uq",
+          "columns": [
+            {
+              "expression": "proposal_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "criterion_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "stage_proposal_idx": {
+          "name": "stage_proposal_idx",
+          "columns": [
+            {
+              "expression": "proposal_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "stage_proposal_id_proposal_id_fk": {
+          "name": "stage_proposal_id_proposal_id_fk",
+          "tableFrom": "stage",
+          "tableTo": "proposal",
+          "columnsFrom": [
+            "proposal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "stage_points_confirmed": {
+          "name": "stage_points_confirmed",
+          "value": "(\"stage\".\"status\" = 'confirmed' and \"stage\".\"points\" = 10) or (\"stage\".\"status\" <> 'confirmed' and \"stage\".\"points\" = 0)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.swipe": {
@@ -910,10 +1246,10 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "swipe_task_id_tasks_id_fk": {
-          "name": "swipe_task_id_tasks_id_fk",
+        "swipe_task_id_task_id_fk": {
+          "name": "swipe_task_id_task_id_fk",
           "tableFrom": "swipe",
-          "tableTo": "tasks",
+          "tableTo": "task",
           "columnsFrom": [
             "task_id"
           ],
@@ -940,8 +1276,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.tasks": {
-      "name": "tasks",
+    "public.task": {
+      "name": "task",
       "schema": "",
       "columns": {
         "id": {
@@ -963,6 +1299,25 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "business_id": {
+          "name": "business_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criteria_version": {
+          "name": "criteria_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "compensation_note": {
+          "name": "compensation_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "company": {
           "name": "company",
@@ -1054,143 +1409,25 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "task_business_id_business_id_fk": {
+          "name": "task_business_id_business_id_fk",
+          "tableFrom": "task",
+          "tableTo": "business",
+          "columnsFrom": [
+            "business_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.task_field": {
-      "name": "task_field",
-      "schema": "",
-      "columns": {
-        "task_id": {
-          "name": "task_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "node": {
-          "name": "node",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "value": {
-          "name": "value",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "state": {
-          "name": "state",
-          "type": "grill_field_state",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'suggested'"
-        },
-        "not_applicable": {
-          "name": "not_applicable",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "na_note": {
-          "name": "na_note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source": {
-          "name": "source",
-          "type": "grill_field_source",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_quote": {
-          "name": "source_quote",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_turn_id": {
-          "name": "source_turn_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "confirmed_at": {
-          "name": "confirmed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "task_field_task_id_tasks_id_fk": {
-          "name": "task_field_task_id_tasks_id_fk",
-          "tableFrom": "task_field",
-          "tableTo": "tasks",
-          "columnsFrom": [
-            "task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "task_field_source_turn_id_grill_turn_id_fk": {
-          "name": "task_field_source_turn_id_grill_turn_id_fk",
-          "tableFrom": "task_field",
-          "tableTo": "grill_turn",
-          "columnsFrom": [
-            "source_turn_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "task_field_pk": {
-          "name": "task_field_pk",
-          "columns": [
-            "task_id",
-            "node"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "task_field_na_note_required": {
-          "name": "task_field_na_note_required",
-          "value": "NOT \"task_field\".\"not_applicable\" OR \"task_field\".\"na_note\" IS NOT NULL"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.team": {

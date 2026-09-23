@@ -6,7 +6,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 
 import * as schema from "@/shared/db/schema";
-import { scoreEvent, task, taskField } from "@/shared/db/schema";
+import { businesses, scoreEvent, task, taskField } from "@/shared/db/schema";
 
 import { checkScoreConsistency, getScore } from "./get-score";
 import { recalculateScore } from "./recalculate-score";
@@ -26,6 +26,7 @@ suite("recalculateScore (Postgres)", () => {
   const createdIds: string[] = [];
 
   before(async () => {
+    await testDb.insert(businesses).values({id: "score-test", name: "Fixture"}).onConflictDoNothing();
     // Одноразовая БД: пустая таблица нужна для проверки мест и сверки.
     const [existing] = await testDb.select({ id: task.id }).from(task).limit(1);
     if (existing)
@@ -36,19 +37,19 @@ suite("recalculateScore (Postgres)", () => {
       .insert(task)
       .values([
         {
-          description: "Fixture", title: "A",
+          businessId: "score-test", description: "Fixture", title: "A",
           status: "published",
           score: 76,
           publishedAt: new Date("2026-09-01"),
         },
         {
-          description: "Fixture", title: "B",
+          businessId: "score-test", description: "Fixture", title: "B",
           status: "published",
           score: 41,
           publishedAt: new Date("2026-09-02"),
         },
         {
-          description: "Fixture", title: "C",
+          businessId: "score-test", description: "Fixture", title: "C",
           status: "published",
           score: 20,
           publishedAt: new Date("2026-09-03"),
@@ -58,7 +59,7 @@ suite("recalculateScore (Postgres)", () => {
     createdIds.push(...seeded.map((row) => row.id));
     const [draft] = await testDb
       .insert(task)
-      .values({ description: "Fixture", title: "Логистика", workFormat: "подработка" })
+      .values({ businessId: "score-test", description: "Fixture", title: "Логистика", workFormat: "подработка" })
       .returning({ id: task.id });
     draftId = draft.id;
     createdIds.push(draft.id);

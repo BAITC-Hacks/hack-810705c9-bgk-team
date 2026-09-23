@@ -1,5 +1,6 @@
+const id = () => text('id').primaryKey().$defaultFn(() => crypto.randomUUID());
 import { sql } from 'drizzle-orm';
-import { boolean, check, index, integer, jsonb, pgEnum, pgTable, primaryKey, serial, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
+import { boolean, check, index, integer, jsonb, pgEnum, pgTable, primaryKey, real, uniqueIndex, serial, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
@@ -8,13 +9,24 @@ export const users = pgTable('users', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
-export const tasks = pgTable('tasks', {
+export const businesses = pgTable('business', {
+  id: id(),
+  name: text('name').notNull(),
+  industry: text('industry').notNull().default(''),
+});
+
+export const TASK_STATUSES = ['draft', 'published', 'in_work', 'closed'] as const;
+
+export const tasks = pgTable('task', {
   id: uuid('id').defaultRandom().primaryKey(),
   title: text('title').notNull().default(''),
   description: text('description').notNull(),
+  businessId: text('business_id').notNull().references(() => businesses.id),
+  criteriaVersion: integer('criteria_version').notNull().default(1),
+  compensationNote: text('compensation_note'),
   company: text('company').notNull().default('Моя компания'),
   topic: text('topic').notNull().default('Другое'),
-  status: text('status').notNull().default('draft'),
+  status: text('status', { enum: TASK_STATUSES }).notNull().default('draft'),
   engagement: text('engagement', { enum: ['paid', 'practice', 'both'] }).notNull().default('practice'),
   neededRoles: text('needed_roles').array().notNull().default([]),
   neededSkills: text('needed_skills').array().notNull().default([]),
@@ -104,6 +116,7 @@ export const criterion = pgTable('criterion', {
   id: uuid('id').defaultRandom().notNull().unique(),
   taskId: uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
   position: integer('position').notNull(),
+  version: integer('version').notNull().default(1),
   metric: text('metric').notNull(),
   threshold: text('threshold').notNull(),
   thresholdHasNumber: boolean('threshold_has_number').notNull().default(false),
@@ -157,33 +170,6 @@ export const aiLogs = pgTable('ai_logs', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const proposals = pgTable('proposals', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  taskId: uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
-  teamId: text('team_id').notNull(),
-  idea: text('idea').notNull(),
-  plan: text('plan').notNull().default(''),
-  timeline: text('timeline').notNull().default(''),
-  prototypeUrl: text('prototype_url'),
-  fit: integer('fit').notNull().default(0),
-  status: text('status').notNull().default('submitted'),
-  rejectReason: text('reject_reason'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  decidedAt: timestamp('decided_at', { withTimezone: true }),
-});
-
-export const proposalStages = pgTable('proposal_stages', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  proposalId: uuid('proposal_id').notNull().references(() => proposals.id, { onDelete: 'cascade' }),
-  criterion: text('criterion').notNull(),
-  evidenceUrl: text('evidence_url'),
-  status: text('status').notNull().default('open'),
-  businessComment: text('business_comment'),
-  points: integer('points').notNull().default(0),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
-
 export const taskFields = taskField;
 export const grillSessions = grillSession;
 export const grillTurns = grillTurn;
@@ -223,3 +209,96 @@ export const swipes = pgTable(
   },
   (t) => [unique('swipe_team_task_action_uq').on(t.teamId, t.taskId, t.action)],
 );
+
+// --- ADR-007: отклики, мэтч (= proposal.accepted) и этапы. ---
+
+export const PROPOSAL_STATUSES = ['submitted', 'on_hold', 'accepted', 'rejected'] as const;
+export const REJECT_REASONS = ['roles', 'stack', 'deadline', 'plan', 'other', 'task_closed'] as const;
+
+export type CriteriaAnswers = {
+  criteriaVersion: number;
+  answers: Record<string, string>; // criterion.id → «как проверим»
+};
+
+export type KickoffItem = { key: string; label: string; value: string };
+
+export type Kickoff = {
+  items: KickoffItem[];
+  firstStage: { criterionId: string; metric: string; threshold: string } | null;
+  contact: string | null;
+  builtAt: string;
+};
+
+export const proposals = pgTable(
+  'proposal',
+  {
+    id: id(),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => tasks.id),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id),
+    solution: text('solution').notNull(),
+    plan: text('plan').notNull(),
+    teamRoles: text('team_roles').array().notNull(),
+    deadline: text('deadline').notNull(),
+    repoUrl: text('repo_url'),
+    criteriaAnswers: jsonb('criteria_answers').$type<CriteriaAnswers>().notNull(),
+    fit: real('fit').notNull(),
+    status: text('status', { enum: PROPOSAL_STATUSES }).notNull().default('submitted'),
+    rejectReason: text('reject_reason', { enum: REJECT_REASONS }),
+    rejectNote: text('reject_note'),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+    kickoff: jsonb('kickoff').$type<Kickoff>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    // FR-6.4: один активный отклик команды на задачу.
+    uniqueIndex('proposal_active_team_task_uq')
+      .on(t.taskId, t.teamId)
+      .where(sql`${t.status} in ('submitted', 'on_hold', 'accepted')`),
+    index('proposal_task_idx').on(t.taskId),
+    check('proposal_fit_range', sql`${t.fit} >= 0 and ${t.fit} <= 1`),
+  ],
+);
+
+export const STAGE_STATUSES = ['open', 'claimed', 'confirmed', 'returned'] as const;
+
+export const stages = pgTable(
+  'stage',
+  {
+    id: id(),
+    proposalId: text('proposal_id')
+      .notNull()
+      .references(() => proposals.id),
+    criterionId: text('criterion_id').notNull(),
+    // Снимок критерия на момент мэтча (FR-8.1); на живой criterion не ссылается.
+    criteriaVersion: integer('criteria_version').notNull(),
+    position: integer('position').notNull().default(0),
+    metric: text('metric').notNull(),
+    threshold: text('threshold').notNull(),
+    howToCheck: text('how_to_check').notNull(),
+    status: text('status', { enum: STAGE_STATUSES }).notNull().default('open'),
+    reportUrl: text('report_url'),
+    teamComment: text('team_comment'),
+    businessComment: text('business_comment'),
+    points: integer('points').notNull().default(0),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('stage_proposal_criterion_uq').on(t.proposalId, t.criterionId),
+    index('stage_proposal_idx').on(t.proposalId),
+    // +10 только у подтверждённого этапа (FR-8.4).
+    check(
+      'stage_points_confirmed',
+      sql`(${t.status} = 'confirmed' and ${t.points} = 10) or (${t.status} <> 'confirmed' and ${t.points} = 0)`,
+    ),
+  ],
+);
+
+export const criteria = criterion;
+export const fields = taskField;

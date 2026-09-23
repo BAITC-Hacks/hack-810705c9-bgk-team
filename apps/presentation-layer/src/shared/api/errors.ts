@@ -1,66 +1,85 @@
-import { NextResponse } from 'next/server';
-// ADR-009: единый формат ошибок `{ error: { code, message, details? } }`,
-// `message` — по-русски для человека.
-import { z, ZodError } from 'zod';
+import { NextResponse } from "next/server";
+import { ZodError } from "zod";
 
-// NFR-4: стандартные тексты zod по-русски; явные сообщения схем важнее.
-z.config(z.locales.ru());
+// ADR-009: единый формат ошибок { error: { code, message, details? } }.
+
+export type ApiErrorCode =
+  | "bad_json"
+  | "validation_error"
+  | "forbidden"
+  | "not_found"
+  | "conflict"
+  | "internal_error";
 
 export class ApiError extends Error {
-  constructor(
-    readonly code: string,
-    readonly status: number,
-    message: string,
-    readonly details?: unknown,
-  ) {
+  readonly status: number;
+  readonly code: string;
+  readonly details?: unknown;
+
+  constructor(status: number, code: string, message: string, details?: unknown) {
     super(message);
-    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+    this.details = details;
   }
 }
 
-export function notFound(message: string, details?: unknown): ApiError {
-  return new ApiError('not_found', 404, message, details);
-}
-
-export function conflict(message: string, details?: unknown): ApiError {
-  return new ApiError('conflict', 409, message, details);
-}
-
-function errorBody(code: string, message: string, details?: unknown) {
-  return {
-    error: details === undefined ? { code, message } : { code, message, details },
-  };
-}
-
-export function toErrorResponse(e: unknown): Response {
-  if (e instanceof ZodError) {
-    const first = e.issues[0];
-    const where = first?.path.length ? ` (${first.path.join('.')})` : '';
-    return Response.json(
-      errorBody(
-        'validation_error',
-        `Некорректные данные запроса${where}: ${first?.message ?? 'проверьте поля'}`,
-        e.issues,
-      ),
+export function toResponse(err: unknown): NextResponse {
+  if (err instanceof ApiError) {
+    return NextResponse.json(
+      { error: { code: err.code, message: err.message, ...(err.details !== undefined ? { details: err.details } : {}) } },
+      { status: err.status },
+    );
+  }
+  if (err instanceof ZodError) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "validation_error",
+          message: "Проверьте заполненные поля",
+          details: z_flatten(err),
+        },
+      },
       { status: 422 },
     );
   }
-  if (e instanceof SyntaxError) {
-    return Response.json(
-      errorBody('invalid_json', 'Тело запроса — не корректный JSON'),
+  if (err instanceof SyntaxError) {
+    return NextResponse.json(
+      { error: { code: "bad_json", message: "Некорректный JSON в теле запроса" } },
       { status: 400 },
     );
   }
-  if (e instanceof ApiError) {
-    return Response.json(errorBody(e.code, e.message, e.details), {
-      status: e.status,
-    });
-  }
-  console.error(e);
-  return Response.json(
-    errorBody('internal_error', 'Внутренняя ошибка сервера. Попробуйте позже'),
+  console.error(err);
+  return NextResponse.json(
+    { error: { code: "internal_error", message: "Внутренняя ошибка сервера" } },
     { status: 500 },
   );
+}
+
+function z_flatten(err: ZodError) {
+  return err.flatten();
+}
+
+/** Оборачивает route handler: ловит ошибки и приводит их к единому формату ответа. */
+export function withApi<Args extends unknown[]>(
+  handler: (...args: Args) => Promise<NextResponse>,
+): (...args: Args) => Promise<NextResponse> {
+  return async (...args: Args) => {
+    try {
+      return await handler(...args);
+    } catch (err) {
+      return toResponse(err);
+    }
+  };
+}
+
+/** Читает JSON тело запроса; невалидный JSON превращается в ApiError(400). */
+export async function readJson(req: Request): Promise<unknown> {
+  try {
+    return await req.json();
+  } catch {
+    throw new ApiError(400, "bad_json", "Некорректный JSON в теле запроса");
+  }
 }
 
 export function apiError(
@@ -74,3 +93,7 @@ export function apiError(
     { status },
   );
 }
+
+export const toErrorResponse = toResponse;
+export const notFound = (message: string, details?: unknown) => new ApiError(404, 'not_found', message, details);
+export const conflict = (message: string, details?: unknown) => new ApiError(409, 'conflict', message, details);

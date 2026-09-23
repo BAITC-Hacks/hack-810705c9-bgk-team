@@ -1,5 +1,6 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { getDemoActor } from '@/shared/api/actor';
 import { db } from '@/shared/db';
 import { aiLogs, grillSessions, grillTurns, taskFields, tasks } from '@/shared/db/schema';
 import { analyzeText } from '@/shared/api/mastra';
@@ -72,10 +73,12 @@ async function response(taskId: string) {
 }
 
 export async function createTask(input: unknown) {
+  const actor = await getDemoActor();
+  if (actor.role !== 'business') throw new ApiError(403, 'forbidden', 'Только бизнес создаёт задачи');
   const { description } = descriptionSchema.parse(input);
   const analyzed = await analyzeText({ text: description, targetNodes: Object.values(workspaceNodes).flat(), dictionary: { roles: [], skills: [] } });
   const draftFields = Object.fromEntries((analyzed?.fields ?? []).filter(f => isNode(f.node)).map(f => [f.node, { value: f.value, sourceQuote: f.source_quote }]));
-  const [row] = await db.insert(tasks).values({ title: description.split(/[\n.!?]/, 1)[0].slice(0,68), description }).returning();
+  const [row] = await db.insert(tasks).values({ businessId: actor.businessId, title: description.split(/[\n.!?]/, 1)[0].slice(0,68), description }).returning();
   await createGrill(row.id, { draftText: description, draftFields });
   await db.insert(aiLogs).values({ taskId: row.id, kind: 'analyze-text', agent: analyzed?.log.agent ?? 'fallback', input: { text: description }, parseOk: Boolean(analyzed), fallbackUsed: !analyzed });
   return { ...await response(row.id), fallbackUsed: !analyzed };
