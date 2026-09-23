@@ -1,3 +1,0 @@
-# Python dependencies for tokio-asyncio-bridge example
-dspy-ai>=2.4.0
-openai>=1.0.0
