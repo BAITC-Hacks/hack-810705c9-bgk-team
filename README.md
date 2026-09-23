@@ -1,5 +1,7 @@
 # Монорепозиторий: Presentation Layer + AI Logic Layer
 
+Команда: BGK-TEAM.
+
 **После клонирования: `./start.sh`.** Инструкция команды: [QUICKSTART.md](QUICKSTART.md).
 Скиллы и правила агентов уже в Git; повторно устанавливать их не нужно.
 Основной стек и границы модулей: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
