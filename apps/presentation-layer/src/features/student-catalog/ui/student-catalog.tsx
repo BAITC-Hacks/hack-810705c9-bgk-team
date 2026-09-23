@@ -1,6 +1,13 @@
 "use client";
 
-import { useId, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { ArrowRight, Magnifier, Xmark } from "@gravity-ui/icons";
 import {
   calculateScore,
@@ -25,6 +32,7 @@ import {
   SheetTitle,
 } from "@/shared/components/ui/sheet";
 import { cn } from "@/shared/lib/utils";
+import { shouldHandleShortcut } from "@/shared/lib/keyboard-shortcuts";
 
 type StudentCatalogProps = {
   tasks: Task[];
@@ -63,6 +71,9 @@ export function StudentCatalog({
   const [readinessFilter, setReadinessFilter] = useState("all");
   const [view, setView] = useState<"all" | "applications">("all");
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const searchInput = useRef<HTMLInputElement | null>(null);
+  const detailsContent = useRef<HTMLDivElement | null>(null);
+  const taskRows = useRef(new Map<string, HTMLButtonElement>());
   const lastOpenedCard = useRef<HTMLButtonElement | null>(null);
   const id = useId();
   const published = tasks.filter((task) => task.status === "published");
@@ -97,6 +108,52 @@ export function StudentCatalog({
     query || industry !== "all" || readinessFilter !== "all",
   );
   const selectedTask = published.find((task) => task.id === selectedTaskId);
+  const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
+    const searchShortcut =
+      (event.ctrlKey || event.metaKey) &&
+      !event.altKey &&
+      !event.shiftKey &&
+      event.code === "KeyK";
+    const detailsShortcut =
+      event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.shiftKey &&
+      event.code === "Digit2";
+    if (!searchShortcut && !detailsShortcut) return;
+    if (searchShortcut) {
+      if (!shouldHandleShortcut(event)) return;
+      event.preventDefault();
+      searchInput.current?.focus();
+      searchInput.current?.select();
+      return;
+    }
+
+    if (!shouldHandleShortcut(event, detailsContent.current)) return;
+    if (detailsOpen) {
+      event.preventDefault();
+      setDetailsOpen(false);
+      return;
+    }
+
+    const task =
+      visible.find(({ task }) => task.id === selectedTaskId)?.task ??
+      visible[0]?.task;
+    if (!task) return;
+    event.preventDefault();
+    lastOpenedCard.current = taskRows.current.get(task.id) ?? null;
+    onSelectTask(task.id);
+    setDetailsOpen(true);
+  });
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      handleShortcut(event);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   function resetFilters() {
     setQuery("");
     setIndustry("all");
@@ -116,7 +173,7 @@ export function StudentCatalog({
           <header className="mb-8 flex flex-wrap items-center justify-between gap-5">
             <h1
               id={`${id}-title`}
-              className="text-2xl font-semibold tracking-tight"
+              className="text-[26px] leading-tight font-bold tracking-[-0.025em] sm:text-[28px]"
             >
               Каталог задач
             </h1>
@@ -143,14 +200,14 @@ export function StudentCatalog({
                 aria-pressed={view === item.value}
                 onClick={() => setView(item.value)}
                 className={cn(
-                  "flex items-center gap-2 border-b-2 pb-3 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+                  "flex items-center gap-2 border-b-2 pb-3 text-sm font-semibold outline-none transition-colors focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4",
                   view === item.value
-                    ? "border-foreground font-medium"
+                    ? "border-foreground text-foreground"
                     : "border-transparent text-muted-foreground hover:text-foreground",
                 )}
               >
                 {item.label}
-                <span className="text-xs font-normal tabular-nums text-muted-foreground">
+                <span className="text-[13px] font-medium tabular-nums text-muted-foreground">
                   {item.count}
                 </span>
               </button>
@@ -163,11 +220,14 @@ export function StudentCatalog({
                 aria-hidden="true"
               />
               <Input
+                ref={searchInput}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Поиск по задачам и компаниям"
                 aria-label="Поиск по задачам, компаниям и темам"
-                className="h-10 rounded-lg border-border bg-background pl-9 pr-9 text-sm shadow-none"
+                aria-keyshortcuts="Control+K Meta+K"
+                title="Поиск задач · Ctrl / ⌘ K"
+                className="h-10 rounded-lg border-border bg-background pl-9 pr-9 text-sm shadow-none placeholder:text-muted-foreground"
               />
               {query && (
                 <Button
@@ -185,7 +245,7 @@ export function StudentCatalog({
               <Select value={industry} onValueChange={setIndustry}>
                 <SelectTrigger
                   aria-label="Тема задачи"
-                  className="h-10 w-full data-[size=default]:h-10 sm:w-44"
+                  className="h-10 w-full font-medium data-[size=default]:h-10 sm:w-44"
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -204,7 +264,7 @@ export function StudentCatalog({
               >
                 <SelectTrigger
                   aria-label="Готовность задачи"
-                  className="h-10 w-full data-[size=default]:h-10 sm:w-56"
+                  className="h-10 w-full font-medium data-[size=default]:h-10 sm:w-56"
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -219,7 +279,7 @@ export function StudentCatalog({
               </Select>
             </div>
           </div>
-          <div className="mt-5 mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <div className="mt-5 mb-3 flex flex-wrap items-center justify-between gap-2 text-[13px] text-muted-foreground">
             <span role="status">
               Показано {visible.length} из{" "}
               {view === "all" ? published.length : myTaskCount}
@@ -227,7 +287,7 @@ export function StudentCatalog({
                 <button
                   type="button"
                   onClick={resetFilters}
-                  className="ml-4 text-foreground underline underline-offset-4"
+                  className="ml-4 rounded-sm font-medium text-foreground underline underline-offset-4 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 >
                   Сбросить фильтры
                 </button>
@@ -243,9 +303,17 @@ export function StudentCatalog({
                 return (
                   <li key={task.id} className="border-b">
                     <button
+                      ref={(node) => {
+                        if (node) taskRows.current.set(task.id, node);
+                        else taskRows.current.delete(task.id);
+                      }}
                       type="button"
                       aria-label={`${task.title} — ${task.company}. Готовность: ${score} из 100, ${state.label.toLowerCase()}.${proposal ? ` ${PROPOSAL_LABELS[proposal.status]}.` : ""} Подробнее`}
                       aria-haspopup="dialog"
+                      aria-keyshortcuts={
+                        selectedTaskId === task.id ? "Alt+2" : undefined
+                      }
+                      title="Открыть задачу · Alt+2 — выбранная задача"
                       aria-expanded={detailsOpen && selectedTaskId === task.id}
                       aria-controls={
                         detailsOpen && selectedTaskId === task.id
@@ -257,10 +325,13 @@ export function StudentCatalog({
                         onSelectTask(task.id);
                         setDetailsOpen(true);
                       }}
-                      className="group grid w-full grid-cols-[minmax(0,1fr)_auto] items-start gap-x-5 gap-y-2 px-1 py-5 text-left transition-colors hover:bg-muted/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring sm:grid-cols-[minmax(0,1fr)_120px_20px] sm:items-center sm:px-3 sm:py-6 lg:grid-cols-[170px_minmax(0,1fr)_120px_20px] lg:gap-6"
+                      className={cn(
+                        "group grid w-full grid-cols-[minmax(0,1fr)_auto] items-start gap-x-5 gap-y-2.5 px-2 py-5 text-left transition-colors hover:bg-muted/70 focus-visible:bg-muted/70 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring sm:grid-cols-[minmax(0,1fr)_120px_20px] sm:items-center sm:px-4 sm:py-6 lg:grid-cols-[170px_minmax(0,1fr)_120px_20px] lg:gap-6",
+                        detailsOpen && selectedTaskId === task.id && "bg-muted",
+                      )}
                     >
-                      <span className="col-span-2 flex items-center gap-2 text-xs text-muted-foreground sm:col-span-3 lg:col-span-1 lg:block">
-                        <span className="text-foreground lg:block lg:text-[13px] lg:font-medium">
+                      <span className="col-span-2 flex items-center gap-2 text-[13px] text-muted-foreground sm:col-span-3 lg:col-span-1 lg:block">
+                        <span className="font-medium text-foreground lg:block">
                           {task.company}
                         </span>
                         <span className="lg:mt-1.5 lg:block">
@@ -268,14 +339,14 @@ export function StudentCatalog({
                         </span>
                       </span>
                       <span className="min-w-0">
-                        <span className="block text-[15px] leading-snug font-medium">
+                        <span className="block text-base leading-snug font-semibold tracking-[-0.01em]">
                           {task.title}
                         </span>
                         <span className="mt-1.5 line-clamp-2 text-[13px] leading-relaxed text-muted-foreground sm:line-clamp-1">
                           {task.description || task.fields.need}
                         </span>
                         {proposal && (
-                          <span className="mt-2 block text-xs text-foreground/80">
+                          <span className="mt-2 block text-[13px] font-medium text-foreground/80">
                             {proposal.milestoneConfirmed
                               ? "Этап подтверждён · +10 баллов"
                               : PROPOSAL_LABELS[proposal.status]}
@@ -283,19 +354,19 @@ export function StudentCatalog({
                         )}
                       </span>
                       <span className="text-right">
-                        <span className="block text-sm font-medium tabular-nums">
+                        <span className="block text-base font-semibold tabular-nums">
                           {score}
                           <span className="font-normal text-muted-foreground">
                             {" "}
                             / 100
                           </span>
                         </span>
-                        <span className="mt-1.5 block max-w-24 text-[11px] leading-snug text-muted-foreground sm:ml-auto sm:max-w-none">
+                        <span className="mt-1.5 block max-w-24 text-xs leading-snug text-muted-foreground sm:ml-auto sm:max-w-none">
                           {state.label}
                         </span>
                       </span>
                       <ArrowRight
-                        className="hidden size-4 text-muted-foreground group-hover:text-foreground sm:block"
+                        className="hidden size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground group-focus-visible:text-foreground motion-reduce:transition-none sm:block"
                         aria-hidden="true"
                       />
                     </button>
@@ -305,7 +376,7 @@ export function StudentCatalog({
             </ul>
           ) : (
             <div className="border-y py-16 text-center">
-              <h2 className="text-base font-medium">
+              <h2 className="text-lg font-semibold">
                 {view === "applications" && !hasFilters
                   ? "У команды пока нет откликов"
                   : "Задачи не найдены"}
@@ -317,7 +388,7 @@ export function StudentCatalog({
               </p>
               <Button
                 variant="outline"
-                className="mt-5"
+                className="mt-5 font-semibold"
                 onClick={() => {
                   resetFilters();
                   if (!hasFilters) setView("all");
@@ -327,19 +398,21 @@ export function StudentCatalog({
               </Button>
             </div>
           )}
-          <p className="mt-5 text-xs text-muted-foreground">
+          <p className="mt-5 text-[13px] text-muted-foreground">
             Любая задача открыта для отклика, независимо от готовности.
           </p>
         </div>
       </main>
       <SheetContent
+        ref={detailsContent}
         id={`${id}-details`}
         side="right"
         showCloseButton={false}
         className="gap-0 border-border bg-background p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-[540px] motion-reduce:animate-none"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
-          lastOpenedCard.current?.focus();
+          if (lastOpenedCard.current?.isConnected) lastOpenedCard.current.focus();
+          else searchInput.current?.focus();
         }}
       >
         <SheetTitle className="sr-only">
@@ -349,12 +422,14 @@ export function StudentCatalog({
           Подробности задачи и отклик вашей команды.
         </SheetDescription>
         <div className="flex shrink-0 items-center justify-between border-b px-5 py-3">
-          <span className="text-xs text-muted-foreground">Каталог задач</span>
+          <span className="text-sm font-semibold">Каталог задач</span>
           <SheetClose asChild>
             <Button
               variant="ghost"
               size="icon"
               aria-label="Закрыть детали задачи"
+              aria-keyshortcuts="Alt+2 Escape"
+              title="Закрыть детали · Alt+2 / Esc"
             >
               <Xmark className="size-4" />
             </Button>

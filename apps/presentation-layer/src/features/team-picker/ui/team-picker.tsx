@@ -1,6 +1,13 @@
 "use client";
 
-import { useId, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { ChevronDown } from "@gravity-ui/icons";
 import type { Team } from "@/entities/workspace";
 import { Button } from "@/shared/components/ui/button";
@@ -22,6 +29,7 @@ import {
 } from "@/shared/components/ui/select";
 import { Textarea } from "@/shared/components/ui/textarea";
 import { cn } from "@/shared/lib/utils";
+import { shouldHandleShortcut } from "@/shared/lib/keyboard-shortcuts";
 
 export type TeamPickerProps = {
   teams: Team[];
@@ -96,6 +104,8 @@ export function TeamPicker({
   const [mode, setMode] = useState<"browse" | "create" | "edit">("browse");
   const [draft, setDraft] = useState<TeamDraft>(EMPTY_DRAFT);
   const [error, setError] = useState("");
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  const dialogContent = useRef<HTMLDivElement | null>(null);
   const id = useId();
   const activeTeam = teams.find((team) => team.id === activeTeamId);
   const selectedTeam =
@@ -110,6 +120,29 @@ export function TeamPicker({
     }
     setOpen(next);
   }
+
+  const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
+    if (
+      !event.altKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.shiftKey ||
+      event.code !== "Digit3"
+    ) {
+      return;
+    }
+    if (!shouldHandleShortcut(event, dialogContent.current)) return;
+    event.preventDefault();
+    changeOpen(!open);
+  });
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      handleShortcut(event);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   function startForm(nextMode: "create" | "edit") {
     setDraft(
@@ -171,11 +204,14 @@ export function TeamPicker({
       <div className="flex min-w-0 items-center gap-3">
         <DialogTrigger asChild>
           <Button
+            ref={trigger}
             variant="outline"
-            className="h-10 min-w-0 gap-3 px-3"
+            className="h-10 min-w-0 gap-3 px-3 text-[13px] font-semibold"
             aria-label={`Моя команда: ${activeTeam?.name ?? "Выбрать команду"}`}
+            aria-keyshortcuts="Alt+3"
+            title="Моя команда · Alt+3"
           >
-            <span className="hidden text-muted-foreground sm:inline">
+            <span className="hidden font-normal text-muted-foreground sm:inline">
               Моя команда
             </span>
             <span className="max-w-44 truncate">
@@ -188,16 +224,23 @@ export function TeamPicker({
           </Button>
         </DialogTrigger>
         <span
-          className="whitespace-nowrap text-xs text-muted-foreground"
+          className="whitespace-nowrap text-xs font-medium tabular-nums text-muted-foreground"
           title="Баллы за подтверждённые бизнесом этапы"
         >
           {points} баллов
         </span>
       </div>
 
-      <DialogContent className="max-h-[calc(100dvh-2rem)] gap-5 overflow-y-auto p-6 sm:max-w-2xl">
+      <DialogContent
+        ref={dialogContent}
+        className="max-h-[calc(100dvh-2rem)] gap-5 overflow-y-auto p-6 sm:max-w-2xl"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          trigger.current?.focus();
+        }}
+      >
         <DialogHeader className="gap-2 pr-6">
-          <DialogTitle className="text-xl font-medium">
+          <DialogTitle className="text-xl font-bold tracking-tight">
             {mode === "create"
               ? "Новая команда"
               : mode === "edit"
@@ -225,12 +268,12 @@ export function TeamPicker({
                     key={team.id}
                     aria-pressed={team.id === selectedTeam?.id}
                     className={cn(
-                      "w-full rounded-lg px-3 py-2.5 text-left outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
-                      team.id === selectedTeam?.id && "bg-muted",
+                      "w-full rounded-lg px-3 py-3 text-left outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
+                      team.id === selectedTeam?.id && "bg-workspace-selected text-workspace-selected-foreground",
                     )}
                     onClick={() => setSelectedId(team.id)}
                   >
-                    <span className="block truncate text-sm font-medium">
+                    <span className="block truncate text-sm font-semibold">
                       {team.name}
                     </span>
                     <span className="mt-0.5 block text-xs text-muted-foreground">
@@ -243,10 +286,10 @@ export function TeamPicker({
 
               {selectedTeam ? (
                 <div className="flex min-w-0 flex-col border-t pt-5 sm:border-t-0 sm:border-l sm:pt-1 sm:pl-6">
-                  <h3 className="break-words text-lg font-medium">
+                  <h3 className="break-words text-[22px] font-bold leading-tight tracking-tight">
                     {selectedTeam.name}
                   </h3>
-                  <p className="mt-1 text-xs text-muted-foreground">
+                  <p className="mt-2 text-xs text-muted-foreground">
                     {memberCount(selectedTeam.members)}
                     {isActive ? " · Ваша текущая команда" : ""}
                   </p>
@@ -256,13 +299,13 @@ export function TeamPicker({
                   </p>
                   <dl className="mt-5 space-y-4 text-sm">
                     <div>
-                      <dt className="font-medium">Навыки и технологии</dt>
+                      <dt className="font-semibold">Навыки и технологии</dt>
                       <dd className="mt-1 break-words leading-6 text-muted-foreground">
                         {selectedTeam.skills.join(", ") || "Не указаны"}
                       </dd>
                     </div>
                     <div>
-                      <dt className="font-medium">Интересы</dt>
+                      <dt className="font-semibold">Интересы</dt>
                       <dd className="mt-1 break-words leading-6 text-muted-foreground">
                         {selectedTeam.interests.join(", ") || "Не указаны"}
                       </dd>
@@ -272,14 +315,14 @@ export function TeamPicker({
                     {isActive ? (
                       <Button
                         variant="outline"
-                        className="h-9"
+                        className="h-10 font-semibold"
                         onClick={() => startForm("edit")}
                       >
                         Изменить профиль
                       </Button>
                     ) : (
                       <Button
-                        className="h-9"
+                        className="h-10 font-semibold"
                         onClick={() => {
                           onTeamChange(selectedTeam.id);
                           setOpen(false);
@@ -299,12 +342,12 @@ export function TeamPicker({
             <div className="flex items-center justify-between border-t pt-4">
               <Button
                 variant="ghost"
-                className="-ml-2"
+                className="-ml-2 font-semibold"
                 onClick={() => startForm("create")}
               >
                 Создать команду
               </Button>
-              <Button variant="outline" onClick={() => setOpen(false)}>
+              <Button variant="outline" className="font-semibold" onClick={() => setOpen(false)}>
                 Готово
               </Button>
             </div>
@@ -313,7 +356,7 @@ export function TeamPicker({
           <form onSubmit={saveTeam} className="space-y-4" noValidate>
             <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
               <div className="space-y-1.5">
-                <label htmlFor={`${id}-name`} className="text-sm font-medium">
+                <label htmlFor={`${id}-name`} className="text-sm font-semibold">
                   Название команды{" "}
                   <span className="text-muted-foreground">*</span>
                 </label>
@@ -332,7 +375,7 @@ export function TeamPicker({
               <div className="space-y-1.5">
                 <label
                   htmlFor={`${id}-members`}
-                  className="text-sm font-medium"
+                  className="text-sm font-semibold"
                 >
                   Участников
                 </label>
@@ -354,7 +397,7 @@ export function TeamPicker({
               </div>
             </div>
             <div className="space-y-1.5">
-              <label htmlFor={`${id}-tagline`} className="text-sm font-medium">
+              <label htmlFor={`${id}-tagline`} className="text-sm font-semibold">
                 О команде
               </label>
               <Textarea
@@ -367,7 +410,7 @@ export function TeamPicker({
               />
             </div>
             <div className="space-y-1.5">
-              <label htmlFor={`${id}-skills`} className="text-sm font-medium">
+              <label htmlFor={`${id}-skills`} className="text-sm font-semibold">
                 Навыки и технологии
               </label>
               <Input
@@ -383,7 +426,7 @@ export function TeamPicker({
             <div className="space-y-1.5">
               <label
                 htmlFor={`${id}-interests`}
-                className="text-sm font-medium"
+                className="text-sm font-semibold"
               >
                 Интересы
               </label>
@@ -425,7 +468,7 @@ export function TeamPicker({
               >
                 Отмена
               </Button>
-              <Button type="submit">
+              <Button type="submit" className="font-semibold">
                 {mode === "create"
                   ? "Создать и выбрать"
                   : "Сохранить изменения"}
