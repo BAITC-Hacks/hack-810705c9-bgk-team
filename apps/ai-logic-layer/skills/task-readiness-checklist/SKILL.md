@@ -75,4 +75,4 @@ On the first evaluation in a thread, the recalculation section states that this 
 
 ## The exit
 
-The report is complete when: the score equals the sum of the breakdown; all seven criteria have a number and a one-line justification; every shortfall has a concrete missing-information item; and the recalculation section (first rating or old→new with delta) is present. Nothing outside the report.
+The exit is a **raw JSON object** (no fences, no prose) with exactly these keys: `score`, `level`, `verdict`, `breakdown`, `missing`, `recalculation` (shape fixed by the `RatingReport` zod schema). It is complete when: the score equals the sum of `awarded` over 7 breakdown rows; all seven criteria have an integer and a one-line justification; every shortfall is a concrete question in `missing`; and `recalculation` is present (firstEvaluation with nulls, or previousScore→score with delta and closedItems). Nothing outside the JSON.

@@ -22,11 +22,14 @@ const EVALUATOR_SKILL_NAMES = [
  * Агент оценки готовности задачи к работе со студентами (геймификация 0–100).
  *
  * Отдельный чат-агент ВНЕ воркфлоу: пользователь сам присылает текст задачи,
- * агент отвечает строгим markdown-отчётом на языке задачи:
- *   1) оценка 0–100 + уровень готовности;
- *   2) расшифровка начисленных баллов по 7 критериям (сумма = оценка);
- *   3) список недостающих сведений;
- *   4) пересчёт после редактирования (первичная оценка либо было→стало).
+ * агент отвечает строгим RAW JSON (без markdown) на языке задачи для
+ * текстовых полей; формат закреплён zod-схемой `RatingReport`
+ * (schemas/rating.ts):
+ *   1) score: 0–100 + level (draft/working/ready/priority);
+ *   2) breakdown[] — 7 критериев (max/awarded/justification), сумма = score;
+ *   3) missing[] — список недостающих сведений;
+ *   4) recalculation — пересчёт после редактирования (firstEvaluation /
+ *      previousScore / delta / closedItems).
  *
  * Чеклист — скилл `task-readiness-checklist` в единой папке
  * apps/ai-logic-layer/skills (пути и модель переиспользуют grill-agent).
@@ -50,28 +53,35 @@ Load your \`task-readiness-checklist\` skill and follow it exactly: the 7-criter
 Your thread memory keeps your previous reports. If the message is an edited version of a task you already scored in this thread, rescore it from scratch with the same rubric, then report the recalculation: previous score → new score, delta, which missing items were closed and which remain. Never adjust the old number incrementally; if the score dropped, say so plainly. If this is the first evaluation in the thread, say that it is the first rating in that section.
 
 ## Not a task?
-If the message contains no task card to evaluate, reply with ONE sentence asking for the task text — no report, no score.
+If the message contains no task card to evaluate, output ONLY this raw JSON and nothing else:
+{"error":"no_task","message":"<one sentence in the dialogue language asking for the task text>"}
 
-## Output — STRICT
-Write the ENTIRE report in the language of the task text (translate headings and criterion names; keep numbers exact). Markdown, exactly these sections, nothing before or after:
+## Output — STRICT JSON
+Output ONLY one raw JSON object — no markdown fences, no prose before or after — matching exactly this shape:
 
-# <"Рейтинг задачи" in the task language> — {score}/100 — {level}
+{
+  "score": <integer 0–100>,
+  "level": "draft" | "working" | "ready" | "priority",
+  "verdict": "<one sentence in the task language: can students start without further clarification?>",
+  "breakdown": [
+    { "criterion": "context_and_need", "max": 20, "awarded": <integer>, "justification": "<task language>" },
+    { "criterion": "data_and_materials", "max": 20, "awarded": <integer>, "justification": "<task language>" },
+    { "criterion": "expected_result", "max": 15, "awarded": <integer>, "justification": "<task language>" },
+    { "criterion": "success_criteria", "max": 15, "awarded": <integer>, "justification": "<task language>" },
+    { "criterion": "constraints", "max": 10, "awarded": <integer>, "justification": "<task language>" },
+    { "criterion": "users", "max": 10, "awarded": <integer>, "justification": "<task language>" },
+    { "criterion": "business_connection", "max": 10, "awarded": <integer>, "justification": "<task language>" }
+  ],
+  "missing": ["<concrete answerable question in the task language>", …],
+  "recalculation": {
+    "firstEvaluation": <true | false>,
+    "previousScore": <integer 0–100 or null>,
+    "delta": <integer or null>,
+    "closedItems": ["<what the edit closed, in the task language>", …]
+  }
+}
 
-{One sentence verdict: can students start without further clarification?}
-
-## <"Расшифровка начисленных баллов">
-| <criterion> | <max> | <awarded> | <justification> |
-|---|---:|---:|---|
-… all 7 criteria, one row each …
-**<"Итого"/total>: {score}**
-
-## <"Недостающие сведения" in the task language>
-{Numbered list of concrete missing items — one answerable question per item; "—" if nothing is missing.}
-
-## <"Пересчёт после редактирования">
-{First evaluation: first rating; recalculation will appear once an edited version is sent. | Recalculated: was {old} → became {new} (Δ{±n}); closed: …; still missing: …}
-
-Hard rules: {score} equals the sum of the awarded column; each criterion is an integer within its maximum; never inflate or deflate to be polite; no text outside the report.`,
+Hard rules: exactly 7 breakdown entries in the order shown; "score" equals the sum of all "awarded" and determines "level" (0–39 draft, 40–69 working, 70–89 ready, 90–100 priority); "missing" lists every shortfall ([] if none); on a first evaluation previousScore and delta are null and closedItems is []; on a recalculation firstEvaluation=false and previousScore/delta reflect old→new (say so plainly if the score dropped); keys and level values exactly as shown, human-readable strings in the task language; never inflate or deflate to be polite; valid JSON only.`,
   memory: sessionMemory,
   // Нативные filesystem-скиллы Mastra (LocalSkillSource) из единой папки
   // apps/ai-logic-layer/skills/<name>/SKILL.md (SKILLS_DIR — см. grill-agent).
