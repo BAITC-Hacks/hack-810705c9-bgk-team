@@ -13,7 +13,7 @@ import {
 } from "./contracts";
 
 describe("workspace API contracts", () => {
-  it("requires explicit onboarding for legacy role cookies", () => {
+  it("supplies compatible defaults for legacy role cookies", () => {
     assert.deepEqual(sessionSchema.parse({ role: "business", teamId: null }), {
       role: "business", teamId: null, onboardingCompleted: false, businessId: null,
     });
