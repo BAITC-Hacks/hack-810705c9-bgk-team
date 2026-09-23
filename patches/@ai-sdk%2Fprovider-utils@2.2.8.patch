@@ -1,0 +1,164 @@
+diff --git a/dist/index.js b/dist/index.js
+index 58756649c132c7b9f241a90a529a39997c45ffca..ba1f0d9b3553833d2b2c45870c18b0df768c1a72 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -706,12 +706,58 @@ async function resolve(value) {
+ 
+ // src/response-handler.ts
+ var import_provider9 = require("@ai-sdk/provider");
++// Local backport for CVE-2026-8769; keep the v2 synchronous JSON API.
++// Limit decoded response bodies to 16 MiB, including chunked responses.
++var MAX_RESPONSE_BODY_BYTES = 16 * 1024 * 1024;
++async function readResponseBodyAsText({ response, url, requestBodyValues }) {
++  const tooLarge = () => new import_provider9.APICallError({
++    message: `Response body exceeded maximum size of ${MAX_RESPONSE_BODY_BYTES} bytes`,
++    url,
++    requestBodyValues,
++    statusCode: response.status,
++    responseHeaders: extractResponseHeaders(response),
++    isRetryable: false
++  });
++  const contentLength = response.headers.get("content-length");
++  if (contentLength != null && Number(contentLength) > MAX_RESPONSE_BODY_BYTES) {
++    try {
++      await response.body?.cancel();
++    } catch {}
++    throw tooLarge();
++  }
++  if (response.body == null) return "";
++  const reader = response.body.getReader();
++  const chunks = [];
++  let totalBytes = 0;
++  try {
++    while (true) {
++      const { done, value } = await reader.read();
++      if (done) break;
++      totalBytes += value.byteLength;
++      if (totalBytes > MAX_RESPONSE_BODY_BYTES) throw tooLarge();
++      chunks.push(value);
++    }
++  } finally {
++    try {
++      await reader.cancel();
++    } catch {} finally {
++      reader.releaseLock();
++    }
++  }
++  const bytes = new Uint8Array(totalBytes);
++  let offset = 0;
++  for (const chunk of chunks) {
++    bytes.set(chunk, offset);
++    offset += chunk.byteLength;
++  }
++  return new TextDecoder().decode(bytes);
++}
+ var createJsonErrorResponseHandler = ({
+   errorSchema,
+   errorToMessage,
+   isRetryable
+ }) => async ({ response, url, requestBodyValues }) => {
+-  const responseBody = await response.text();
++  const responseBody = await readResponseBodyAsText({ response, url, requestBodyValues });
+   const responseHeaders = extractResponseHeaders(response);
+   if (responseBody.trim() === "") {
+     return {
+@@ -812,7 +858,7 @@ var createJsonStreamResponseHandler = (chunkSchema) => async ({ response }) => {
+   };
+ };
+ var createJsonResponseHandler = (responseSchema) => async ({ response, url, requestBodyValues }) => {
+-  const responseBody = await response.text();
++  const responseBody = await readResponseBodyAsText({ response, url, requestBodyValues });
+   const parsedResult = safeParseJSON({
+     text: responseBody,
+     schema: responseSchema
+@@ -867,7 +913,7 @@ var createBinaryResponseHandler = () => async ({ response, url, requestBodyValue
+ };
+ var createStatusCodeErrorResponseHandler = () => async ({ response, url, requestBodyValues }) => {
+   const responseHeaders = extractResponseHeaders(response);
+-  const responseBody = await response.text();
++  const responseBody = await readResponseBodyAsText({ response, url, requestBodyValues });
+   return {
+     responseHeaders,
+     value: new import_provider9.APICallError({
+diff --git a/dist/index.mjs b/dist/index.mjs
+index b0d8bed91fb0f8e4b5d28b92594139b354b31ddc..98be34707f5d86cc87f59f70c15a186fd3862f41 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -636,12 +636,58 @@ async function resolve(value) {
+ 
+ // src/response-handler.ts
+ import { APICallError as APICallError3, EmptyResponseBodyError } from "@ai-sdk/provider";
++// Local backport for CVE-2026-8769; keep the v2 synchronous JSON API.
++// Limit decoded response bodies to 16 MiB, including chunked responses.
++var MAX_RESPONSE_BODY_BYTES = 16 * 1024 * 1024;
++async function readResponseBodyAsText({ response, url, requestBodyValues }) {
++  const tooLarge = () => new APICallError3({
++    message: `Response body exceeded maximum size of ${MAX_RESPONSE_BODY_BYTES} bytes`,
++    url,
++    requestBodyValues,
++    statusCode: response.status,
++    responseHeaders: extractResponseHeaders(response),
++    isRetryable: false
++  });
++  const contentLength = response.headers.get("content-length");
++  if (contentLength != null && Number(contentLength) > MAX_RESPONSE_BODY_BYTES) {
++    try {
++      await response.body?.cancel();
++    } catch {}
++    throw tooLarge();
++  }
++  if (response.body == null) return "";
++  const reader = response.body.getReader();
++  const chunks = [];
++  let totalBytes = 0;
++  try {
++    while (true) {
++      const { done, value } = await reader.read();
++      if (done) break;
++      totalBytes += value.byteLength;
++      if (totalBytes > MAX_RESPONSE_BODY_BYTES) throw tooLarge();
++      chunks.push(value);
++    }
++  } finally {
++    try {
++      await reader.cancel();
++    } catch {} finally {
++      reader.releaseLock();
++    }
++  }
++  const bytes = new Uint8Array(totalBytes);
++  let offset = 0;
++  for (const chunk of chunks) {
++    bytes.set(chunk, offset);
++    offset += chunk.byteLength;
++  }
++  return new TextDecoder().decode(bytes);
++}
+ var createJsonErrorResponseHandler = ({
+   errorSchema,
+   errorToMessage,
+   isRetryable
+ }) => async ({ response, url, requestBodyValues }) => {
+-  const responseBody = await response.text();
++  const responseBody = await readResponseBodyAsText({ response, url, requestBodyValues });
+   const responseHeaders = extractResponseHeaders(response);
+   if (responseBody.trim() === "") {
+     return {
+@@ -742,7 +788,7 @@ var createJsonStreamResponseHandler = (chunkSchema) => async ({ response }) => {
+   };
+ };
+ var createJsonResponseHandler = (responseSchema) => async ({ response, url, requestBodyValues }) => {
+-  const responseBody = await response.text();
++  const responseBody = await readResponseBodyAsText({ response, url, requestBodyValues });
+   const parsedResult = safeParseJSON({
+     text: responseBody,
+     schema: responseSchema
+@@ -797,7 +843,7 @@ var createBinaryResponseHandler = () => async ({ response, url, requestBodyValue
+ };
+ var createStatusCodeErrorResponseHandler = () => async ({ response, url, requestBodyValues }) => {
+   const responseHeaders = extractResponseHeaders(response);
+-  const responseBody = await response.text();
++  const responseBody = await readResponseBodyAsText({ response, url, requestBodyValues });
+   return {
+     responseHeaders,
+     value: new APICallError3({

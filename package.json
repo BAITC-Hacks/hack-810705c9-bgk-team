@@ -8,7 +8,8 @@
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "check-types": "turbo run check-types",
     "doctor": "./doctor.sh",
-    "start:dev": "./start.sh"
+    "start:dev": "./start.sh",
+    "test:security": "node --test tests/dependency-security.test.mjs"
   },
   "devDependencies": {
     "prettier": "3.9.6",
@@ -28,5 +29,12 @@
     "apps/*",
     "packages/*"
   ],
-  "packageManager": "bun@1.4.2"
+  "packageManager": "bun@1.4.2",
+  "overrides": {
+    "ansi-to-react>linkify-it": "5.0.2",
+    "@esbuild-kit/core-utils>esbuild": "0.25.12"
+  },
+  "patchedDependencies": {
+    "@ai-sdk/provider-utils@2.2.8": "patches/@ai-sdk%2Fprovider-utils@2.2.8.patch"
+  }
 }
