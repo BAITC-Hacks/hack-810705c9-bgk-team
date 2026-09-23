@@ -1,8 +1,10 @@
+CREATE TYPE "public"."engagement" AS ENUM('paid', 'practice', 'both');--> statement-breakpoint
 CREATE TYPE "public"."grill_draft_checkpoint_state" AS ENUM('pending', 'confirmed');--> statement-breakpoint
 CREATE TYPE "public"."grill_field_source" AS ENUM('draft', 'turn', 'manual');--> statement-breakpoint
 CREATE TYPE "public"."grill_field_state" AS ENUM('suggested', 'confirmed');--> statement-breakpoint
 CREATE TYPE "public"."grill_session_status" AS ENUM('active', 'finished');--> statement-breakpoint
 CREATE TYPE "public"."grill_tags_state" AS ENUM('suggested', 'confirmed');--> statement-breakpoint
+CREATE TYPE "public"."swipe_action" AS ENUM('skip', 'missing');--> statement-breakpoint
 CREATE TABLE "ai_logs" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"task_id" uuid NOT NULL,
@@ -117,9 +119,20 @@ CREATE TABLE "score_event" (
 	"at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "swipe" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"team_id" uuid NOT NULL,
+	"task_id" uuid NOT NULL,
+	"action" "swipe_action" NOT NULL,
+	"block" text,
+	"note" text,
+	"at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "swipe_team_task_action_uq" UNIQUE("team_id","task_id","action")
+);
+--> statement-breakpoint
 CREATE TABLE "tasks" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"title" text,
+	"title" text DEFAULT '' NOT NULL,
 	"description" text NOT NULL,
 	"company" text DEFAULT 'Моя компания' NOT NULL,
 	"topic" text DEFAULT 'Другое' NOT NULL,
@@ -153,6 +166,17 @@ CREATE TABLE "task_field" (
 	CONSTRAINT "task_field_na_note_required" CHECK (NOT "task_field"."not_applicable" OR "task_field"."na_note" IS NOT NULL)
 );
 --> statement-breakpoint
+CREATE TABLE "team" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"name" text NOT NULL,
+	"roles" text[] DEFAULT '{}' NOT NULL,
+	"skills" text[] DEFAULT '{}' NOT NULL,
+	"technologies" text[] DEFAULT '{}' NOT NULL,
+	"interests" text[] DEFAULT '{}' NOT NULL,
+	"looking_for" "engagement" NOT NULL,
+	CONSTRAINT "team_name_unique" UNIQUE("name")
+);
+--> statement-breakpoint
 ALTER TABLE "ai_logs" ADD CONSTRAINT "ai_logs_task_id_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "ai_logs" ADD CONSTRAINT "ai_logs_turn_id_grill_turn_id_fk" FOREIGN KEY ("turn_id") REFERENCES "public"."grill_turn"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "criterion" ADD CONSTRAINT "criterion_task_id_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -162,6 +186,8 @@ ALTER TABLE "grill_turn" ADD CONSTRAINT "grill_turn_session_id_grill_session_id_
 ALTER TABLE "proposal_stages" ADD CONSTRAINT "proposal_stages_proposal_id_proposals_id_fk" FOREIGN KEY ("proposal_id") REFERENCES "public"."proposals"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "proposals" ADD CONSTRAINT "proposals_task_id_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "score_event" ADD CONSTRAINT "score_event_task_id_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "swipe" ADD CONSTRAINT "swipe_team_id_team_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."team"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "swipe" ADD CONSTRAINT "swipe_task_id_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "task_field" ADD CONSTRAINT "task_field_task_id_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "task_field" ADD CONSTRAINT "task_field_source_turn_id_grill_turn_id_fk" FOREIGN KEY ("source_turn_id") REFERENCES "public"."grill_turn"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "score_event_task_at_idx" ON "score_event" USING btree ("task_id","at" DESC NULLS LAST);

@@ -10,12 +10,12 @@ export const users = pgTable('users', {
 
 export const tasks = pgTable('tasks', {
   id: uuid('id').defaultRandom().primaryKey(),
-  title: text('title'),
+  title: text('title').notNull().default(''),
   description: text('description').notNull(),
   company: text('company').notNull().default('Моя компания'),
   topic: text('topic').notNull().default('Другое'),
   status: text('status').notNull().default('draft'),
-  engagement: text('engagement').notNull().default('practice'),
+  engagement: text('engagement', { enum: ['paid', 'practice', 'both'] }).notNull().default('practice'),
   neededRoles: text('needed_roles').array().notNull().default([]),
   neededSkills: text('needed_skills').array().notNull().default([]),
   score: integer('score').notNull().default(0),
@@ -193,3 +193,33 @@ export type TaskRow = typeof task.$inferSelect;
 export type TaskFieldRow = typeof taskField.$inferSelect;
 export type CriterionRow = typeof criterion.$inferSelect;
 export type ScoreEventRow = typeof scoreEvent.$inferSelect;
+
+export const engagement = pgEnum('engagement', ['paid', 'practice', 'both']);
+export const swipeAction = pgEnum('swipe_action', ['skip', 'missing']);
+export const teams = pgTable('team', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull().unique(),
+  roles: text('roles').array().notNull().default([]),
+  skills: text('skills').array().notNull().default([]),
+  technologies: text('technologies').array().notNull().default([]),
+  interests: text('interests').array().notNull().default([]),
+  lookingFor: engagement('looking_for').notNull(),
+});
+
+export const swipes = pgTable(
+  'swipe',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    action: swipeAction('action').notNull(),
+    block: text('block'),
+    note: text('note'),
+    at: timestamp('at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [unique('swipe_team_task_action_uq').on(t.teamId, t.taskId, t.action)],
+);

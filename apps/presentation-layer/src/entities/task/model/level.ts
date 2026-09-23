@@ -25,3 +25,11 @@ export function levelOf(score: number): Level {
 export function levelRange(level: Level): { min: number; max: number } {
   return { ...LEVEL_RANGES[level] };
 }
+
+/** Метки каталога FR-4.6. */
+export function catalogBadge(score: number): string | null {
+  const level = levelOf(score);
+  if (level === 'draft') return 'Требует уточнения';
+  if (level === 'priority') return 'Полностью готова';
+  return null;
+}

@@ -1,5 +1,5 @@
 {
-  "id": "1a8be032-2857-4609-9599-fd0b0c5cdc44",
+  "id": "b6eb98b4-e524-4546-9840-664a4fa0749c",
   "prevId": "1444c1a8-0c0b-4ef7-bd51-a74a75a7c71e",
   "version": "7",
   "dialect": "postgresql",
@@ -845,6 +845,101 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.swipe": {
+      "name": "swipe",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "team_id": {
+          "name": "team_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action": {
+          "name": "action",
+          "type": "swipe_action",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "block": {
+          "name": "block",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "at": {
+          "name": "at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "swipe_team_id_team_id_fk": {
+          "name": "swipe_team_id_team_id_fk",
+          "tableFrom": "swipe",
+          "tableTo": "team",
+          "columnsFrom": [
+            "team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "swipe_task_id_tasks_id_fk": {
+          "name": "swipe_task_id_tasks_id_fk",
+          "tableFrom": "swipe",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "task_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "swipe_team_task_action_uq": {
+          "name": "swipe_team_task_action_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "team_id",
+            "task_id",
+            "action"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.tasks": {
       "name": "tasks",
       "schema": "",
@@ -860,7 +955,8 @@
           "name": "title",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": "''"
         },
         "description": {
           "name": "description",
@@ -1097,6 +1193,75 @@
       },
       "isRLSEnabled": false
     },
+    "public.team": {
+      "name": "team",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "roles": {
+          "name": "roles",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'"
+        },
+        "skills": {
+          "name": "skills",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'"
+        },
+        "technologies": {
+          "name": "technologies",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'"
+        },
+        "interests": {
+          "name": "interests",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'"
+        },
+        "looking_for": {
+          "name": "looking_for",
+          "type": "engagement",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "team_name_unique": {
+          "name": "team_name_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "name"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.users": {
       "name": "users",
       "schema": "",
@@ -1145,6 +1310,15 @@
     }
   },
   "enums": {
+    "public.engagement": {
+      "name": "engagement",
+      "schema": "public",
+      "values": [
+        "paid",
+        "practice",
+        "both"
+      ]
+    },
     "public.grill_draft_checkpoint_state": {
       "name": "grill_draft_checkpoint_state",
       "schema": "public",
@@ -1184,6 +1358,14 @@
       "values": [
         "suggested",
         "confirmed"
+      ]
+    },
+    "public.swipe_action": {
+      "name": "swipe_action",
+      "schema": "public",
+      "values": [
+        "skip",
+        "missing"
       ]
     }
   },
