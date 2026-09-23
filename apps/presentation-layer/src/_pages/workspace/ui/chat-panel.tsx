@@ -128,7 +128,7 @@ export function ChatPanel({
     menuMode === "mention"
       ? (mention?.query.toLocaleLowerCase("ru") ?? "")
       : "";
-  const options = [...CHAT_OPTIONS, ...questionOptions].filter((option) =>
+  const options = CHAT_OPTIONS.filter((option) =>
     [option.label, ...option.aliases].some((value) =>
       value.toLocaleLowerCase("ru").includes(query),
     ),
@@ -172,6 +172,7 @@ export function ChatPanel({
     if (option.kind === "question") {
       setAnswerField(option.field);
       setSelectedSkill(undefined);
+      requestAnimationFrame(() => inputRef.current?.focus());
       return;
     }
     setSelectedSkill(option.id);
