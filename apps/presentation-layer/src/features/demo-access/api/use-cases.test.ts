@@ -6,7 +6,15 @@ import { ForbiddenError, type DemoActor } from "@/shared/lib/demo-actor";
 
 import { UseCaseError, toErrorResponse } from "./errors";
 import { STUB_IDS, createStubRepository, type DemoAccessRepository } from "./repository";
-import { claimStage, decideProposal, getAiLog } from "./use-cases";
+import { INVALID_JSON } from "./read-body";
+import {
+  claimStage,
+  confirmStage,
+  decideProposal,
+  getAiLog,
+  returnStage,
+  updateProposal,
+} from "./use-cases";
 
 const [bizLogistics, bizFactory] = DEMO_BUSINESSES;
 const [botForge, dataBrew] = DEMO_TEAMS;
@@ -75,6 +83,13 @@ describe("POST /api/proposals/:id/decision: decideProposal", () => {
     );
   });
 
+  it("роль team с невалидным телом → 403, а не 400", async () => {
+    assert.equal(await statusOf(decideProposal(teamBot, STUB_IDS.proposalPixelUx, INVALID_JSON, repo)), 403);
+    assert.equal(await statusOf(decideProposal(teamBot, STUB_IDS.proposalPixelUx, { action: "x" }, repo)), 403);
+    assert.equal(await statusOf(decideProposal(owner, STUB_IDS.proposalPixelUx, INVALID_JSON, repo)), 400);
+    assert.equal(await statusOf(decideProposal(owner, STUB_IDS.proposalPixelUx, { action: "x" }, repo)), 400);
+  });
+
   it("чужой бизнес → 403, статус не меняется", async () => {
     assert.equal(
       await statusOf(decideProposal(otherBusiness, STUB_IDS.proposalPixelUx, { action: "accept" }, repo)),
@@ -113,5 +128,50 @@ describe("POST /api/stages/:id/claim: claimStage", () => {
     assert.equal(await statusOf(claimStage(owner, STUB_IDS.stageBotForge, {}, repo)), 403);
     await claimStage(teamBot, STUB_IDS.stageBotForge, {}, repo);
     assert.equal(await statusOf(claimStage(teamBot, STUB_IDS.stageBotForge, {}, repo)), 409);
+  });
+});
+
+describe("updateProposal", () => {
+  const pixelUx: DemoActor = { role: "team", teamId: DEMO_TEAMS[2].id };
+
+  it("команда-автор правит отклик до решения", async () => {
+    const proposal = await updateProposal(pixelUx, STUB_IDS.proposalPixelUx, { plan: "Новый план" }, repo);
+    assert.equal(proposal.plan, "Новый план");
+  });
+
+  it("другая команда → 403, бизнес → 403", async () => {
+    assert.equal(await statusOf(updateProposal(teamBot, STUB_IDS.proposalPixelUx, { plan: "x" }, repo)), 403);
+    assert.equal(await statusOf(updateProposal(owner, STUB_IDS.proposalPixelUx, { plan: "x" }, repo)), 403);
+    assert.equal((await repo.findProposal(STUB_IDS.proposalPixelUx))?.plan, "Прототип за 2 недели");
+  });
+
+  it("после решения бизнеса → 409", async () => {
+    assert.equal(await statusOf(updateProposal(teamBot, STUB_IDS.proposalBotForge, { plan: "x" }, repo)), 409);
+  });
+});
+
+describe("confirmStage / returnStage", () => {
+  it("бизнес-владелец подтверждает сданный этап", async () => {
+    const stage = await confirmStage(owner, STUB_IDS.stageBotForgeClaimed, {}, repo);
+    assert.equal(stage.status, "confirmed");
+  });
+
+  it("бизнес-владелец возвращает этап с комментарием", async () => {
+    const stage = await returnStage(owner, STUB_IDS.stageBotForgeClaimed, { comment: "Нет отчёта" }, repo);
+    assert.equal(stage.status, "returned");
+    assert.equal(stage.businessComment, "Нет отчёта");
+  });
+
+  it("чужой бизнес → 403, команда (даже автор) → 403", async () => {
+    for (const review of [confirmStage, returnStage]) {
+      assert.equal(await statusOf(review(otherBusiness, STUB_IDS.stageBotForgeClaimed, {}, repo)), 403);
+      assert.equal(await statusOf(review(teamBot, STUB_IDS.stageBotForgeClaimed, {}, repo)), 403);
+      assert.equal(await statusOf(review(teamData, STUB_IDS.stageBotForgeClaimed, {}, repo)), 403);
+    }
+    assert.equal((await repo.findStage(STUB_IDS.stageBotForgeClaimed))?.status, "claimed");
+  });
+
+  it("несданный этап → 409", async () => {
+    assert.equal(await statusOf(confirmStage(owner, STUB_IDS.stageBotForge, {}, repo)), 409);
   });
 });

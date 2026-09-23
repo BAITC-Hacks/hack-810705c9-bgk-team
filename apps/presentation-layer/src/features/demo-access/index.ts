@@ -1,5 +1,5 @@
 export { toErrorResponse, UseCaseError } from "./api/errors";
-export { readBody } from "./api/read-body";
+export { INVALID_JSON, parseInput, readBody } from "./api/read-body";
 export {
   createStubRepository,
   demoAccessRepository,
@@ -15,8 +15,18 @@ export type {
 export {
   claimInputSchema,
   claimStage,
+  confirmStage,
   decideProposal,
   decisionInputSchema,
   getAiLog,
+  proposalUpdateSchema,
+  returnStage,
+  stageReviewSchema,
+  updateProposal,
 } from "./api/use-cases";
-export type { ClaimInput, DecisionInput } from "./api/use-cases";
+export type {
+  ClaimInput,
+  DecisionInput,
+  ProposalUpdateInput,
+  StageReviewInput,
+} from "./api/use-cases";

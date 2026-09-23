@@ -17,12 +17,15 @@ export type ProposalRecord = {
   teamId: string;
   status: ProposalStatus;
   rejectReason: string | null;
+  solution: string;
+  plan: string;
 };
 export type StageRecord = {
   id: string;
   proposalId: string;
   status: StageStatus;
   reportUrl: string | null;
+  businessComment: string | null;
 };
 /** Состав записи по AI-14 / ADR-003. */
 export type AiLogEntry = {
@@ -58,6 +61,8 @@ export const STUB_IDS = {
   proposalPixelUx: "demo-proposal-pixelux",
   stageBotForge: "demo-stage-botforge",
   stageDataBrew: "demo-stage-databrew",
+  /** Этап BotForge, уже сданный командой: для confirm / return. */
+  stageBotForgeClaimed: "demo-stage-botforge-claimed",
 } as const;
 
 type StubData = {
@@ -74,14 +79,15 @@ function seed(): StubData {
       { id: STUB_IDS.otherTask, businessId: bizFactory.id, title: "Учёт простоев станков" },
     ],
     proposals: [
-      { id: STUB_IDS.proposalBotForge, taskId: STUB_IDS.task, teamId: botForge.id, status: "accepted", rejectReason: null },
+      { id: STUB_IDS.proposalBotForge, taskId: STUB_IDS.task, teamId: botForge.id, status: "accepted", rejectReason: null, solution: "Telegram-бот со статусами", plan: "Прототип за 2 недели" },
       // T-18: бизнес выбрал две команды, у каждой свой этап.
-      { id: STUB_IDS.proposalDataBrew, taskId: STUB_IDS.task, teamId: dataBrew.id, status: "accepted", rejectReason: null },
-      { id: STUB_IDS.proposalPixelUx, taskId: STUB_IDS.task, teamId: pixelUx.id, status: "submitted", rejectReason: null },
+      { id: STUB_IDS.proposalDataBrew, taskId: STUB_IDS.task, teamId: dataBrew.id, status: "accepted", rejectReason: null, solution: "Telegram-бот со статусами", plan: "Прототип за 2 недели" },
+      { id: STUB_IDS.proposalPixelUx, taskId: STUB_IDS.task, teamId: pixelUx.id, status: "submitted", rejectReason: null, solution: "Telegram-бот со статусами", plan: "Прототип за 2 недели" },
     ],
     stages: [
-      { id: STUB_IDS.stageBotForge, proposalId: STUB_IDS.proposalBotForge, status: "open", reportUrl: null },
-      { id: STUB_IDS.stageDataBrew, proposalId: STUB_IDS.proposalDataBrew, status: "open", reportUrl: null },
+      { id: STUB_IDS.stageBotForge, proposalId: STUB_IDS.proposalBotForge, status: "open", reportUrl: null, businessComment: null },
+      { id: STUB_IDS.stageDataBrew, proposalId: STUB_IDS.proposalDataBrew, status: "open", reportUrl: null, businessComment: null },
+      { id: STUB_IDS.stageBotForgeClaimed, proposalId: STUB_IDS.proposalBotForge, status: "claimed", reportUrl: "https://example.com/botforge/report", businessComment: null },
     ],
     aiLog: [
       {

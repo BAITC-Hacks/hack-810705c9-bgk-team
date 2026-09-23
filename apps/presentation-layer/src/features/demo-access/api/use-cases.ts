@@ -1,9 +1,11 @@
 // ADR-008, п. 2 и 4: use-case принимают `actor` обязательным аргументом и
 // проверяют роль и владение на сервере. UI-скрытие кнопок не заменяет эти проверки.
+// Порядок: роль → разбор входа → загрузка → владение. Чужая роль получает 403
+// даже с невалидным телом.
 //
-// ИНТЕГРАЦИЯ: `decideProposal` / `claimStage` — минимальные варианты. Полную
-// логику (мэтч, стартовый пакет, баллы) даёт ADR-007; при слиянии его use-case
-// вызывают те же `assertTaskOwner` / `assertProposalOwner` в том же порядке.
+// ИНТЕГРАЦИЯ: минимальные варианты. Полную логику (мэтч, стартовый пакет,
+// баллы за этап) даёт ADR-007; при слиянии его use-case вызывают те же
+// `assertRole` / `assertTaskOwner` / `assertProposalOwner` в том же порядке.
 // `getAiLog` — точка интеграции ADR-003.
 
 import { z } from "zod";
@@ -16,6 +18,7 @@ import {
 } from "@/shared/lib/demo-actor";
 
 import { UseCaseError } from "./errors";
+import { parseInput } from "./read-body";
 import type {
   AiLogEntry,
   DemoAccessRepository,
@@ -32,10 +35,27 @@ export async function getAiLog(
 ): Promise<AiLogEntry[]> {
   assertRole(actor, "business");
   if (!taskId) throw new UseCaseError("bad_request", "Укажите taskId");
-  const task = await repo.findTask(taskId);
-  if (!task) throw new UseCaseError("not_found", "Задача не найдена");
+  const task = await loadTask(repo, taskId);
   assertTaskOwner(actor, task);
   return repo.listAiLog(task.id);
+}
+
+async function loadTask(repo: DemoAccessRepository, taskId: string) {
+  const task = await repo.findTask(taskId);
+  if (!task) throw new UseCaseError("not_found", "Задача не найдена");
+  return task;
+}
+
+async function loadProposal(repo: DemoAccessRepository, proposalId: string) {
+  const proposal = await repo.findProposal(proposalId);
+  if (!proposal) throw new UseCaseError("not_found", "Отклик не найден");
+  return proposal;
+}
+
+async function loadStage(repo: DemoAccessRepository, stageId: string) {
+  const stage = await repo.findStage(stageId);
+  if (!stage) throw new UseCaseError("not_found", "Этап не найден");
+  return { stage, proposal: await loadProposal(repo, stage.proposalId) };
 }
 
 export const decisionInputSchema = z.object({
@@ -51,27 +71,22 @@ const DECISION_TARGET: Record<DecisionInput["action"], ProposalStatus> = {
   submitted: "submitted",
 };
 
-/** Раздел 9.2: `submitted ↔ on_hold → accepted / rejected`; меняет только бизнес. */
-function canMove(from: ProposalStatus, to: ProposalStatus): boolean {
-  if (from === "accepted" || from === "rejected") return false;
-  return from !== to;
-}
+const isDecided = (status: ProposalStatus) => status === "accepted" || status === "rejected";
 
+/** Раздел 9.2: `submitted ↔ on_hold → accepted / rejected`; меняет только бизнес-владелец. */
 export async function decideProposal(
   actor: DemoActor,
   proposalId: string,
-  input: DecisionInput,
+  rawInput: unknown,
   repo: DemoAccessRepository,
 ): Promise<ProposalRecord> {
   assertRole(actor, "business");
-  const proposal = await repo.findProposal(proposalId);
-  if (!proposal) throw new UseCaseError("not_found", "Отклик не найден");
-  const task = await repo.findTask(proposal.taskId);
-  if (!task) throw new UseCaseError("not_found", "Задача не найдена");
-  assertTaskOwner(actor, task);
+  const input = parseInput(decisionInputSchema, rawInput);
+  const proposal = await loadProposal(repo, proposalId);
+  assertTaskOwner(actor, await loadTask(repo, proposal.taskId));
 
   const status = DECISION_TARGET[input.action];
-  if (!canMove(proposal.status, status)) {
+  if (isDecided(proposal.status) || proposal.status === status) {
     throw new UseCaseError("conflict", "Недопустимый переход статуса отклика");
   }
   return repo.saveProposal({
@@ -79,6 +94,33 @@ export async function decideProposal(
     status,
     rejectReason: input.action === "reject" ? (input.reason ?? null) : null,
   });
+}
+
+export const proposalUpdateSchema = z
+  .object({
+    solution: z.string().trim().min(1).max(4000).optional(),
+    plan: z.string().trim().min(1).max(4000).optional(),
+  })
+  .refine((value) => value.solution !== undefined || value.plan !== undefined, {
+    message: "Нечего обновлять",
+  });
+export type ProposalUpdateInput = z.infer<typeof proposalUpdateSchema>;
+
+/** FR-6.4: команда-автор правит отклик до решения бизнеса. */
+export async function updateProposal(
+  actor: DemoActor,
+  proposalId: string,
+  rawInput: unknown,
+  repo: DemoAccessRepository,
+): Promise<ProposalRecord> {
+  assertRole(actor, "team");
+  const input = parseInput(proposalUpdateSchema, rawInput);
+  const proposal = await loadProposal(repo, proposalId);
+  assertProposalOwner(actor, proposal);
+  if (isDecided(proposal.status)) {
+    throw new UseCaseError("conflict", "По отклику уже принято решение");
+  }
+  return repo.saveProposal({ ...proposal, ...input });
 }
 
 export const claimInputSchema = z.object({
@@ -90,14 +132,12 @@ export type ClaimInput = z.infer<typeof claimInputSchema>;
 export async function claimStage(
   actor: DemoActor,
   stageId: string,
-  input: ClaimInput,
+  rawInput: unknown,
   repo: DemoAccessRepository,
 ): Promise<StageRecord> {
   assertRole(actor, "team");
-  const stage = await repo.findStage(stageId);
-  if (!stage) throw new UseCaseError("not_found", "Этап не найден");
-  const proposal = await repo.findProposal(stage.proposalId);
-  if (!proposal) throw new UseCaseError("not_found", "Отклик не найден");
+  const input = parseInput(claimInputSchema, rawInput);
+  const { stage, proposal } = await loadStage(repo, stageId);
   assertProposalOwner(actor, proposal);
 
   if (stage.status !== "open" && stage.status !== "returned") {
@@ -109,3 +149,34 @@ export async function claimStage(
     reportUrl: input.reportUrl ?? stage.reportUrl,
   });
 }
+
+export const stageReviewSchema = z.object({
+  comment: z.string().trim().min(1).max(2000).optional(),
+});
+export type StageReviewInput = z.infer<typeof stageReviewSchema>;
+
+/** `claimed → confirmed | returned`; решает бизнес-владелец задачи (этап → отклик → задача). */
+async function reviewStage(
+  status: "confirmed" | "returned",
+  actor: DemoActor,
+  stageId: string,
+  rawInput: unknown,
+  repo: DemoAccessRepository,
+): Promise<StageRecord> {
+  assertRole(actor, "business");
+  const input = parseInput(stageReviewSchema, rawInput);
+  const { stage, proposal } = await loadStage(repo, stageId);
+  assertTaskOwner(actor, await loadTask(repo, proposal.taskId));
+
+  if (stage.status !== "claimed") {
+    throw new UseCaseError("conflict", "Этап ещё не сдан командой");
+  }
+  return repo.saveStage({
+    ...stage,
+    status,
+    businessComment: input.comment ?? stage.businessComment,
+  });
+}
+
+export const confirmStage = reviewStage.bind(null, "confirmed");
+export const returnStage = reviewStage.bind(null, "returned");
