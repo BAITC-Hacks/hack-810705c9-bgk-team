@@ -10,6 +10,7 @@ COPY --from=pruner /app/out/json/ .
 # См. apps/presentation-layer/Dockerfile: pruned bun.lock от `turbo prune` невалиден
 # для bun, поэтому frozen-установка идёт по оригинальному lockfile.
 COPY --from=pruner /app/bun.lock ./bun.lock
+COPY --from=pruner /app/patches ./patches
 RUN bun install --frozen-lockfile
 
 FROM installer AS builder

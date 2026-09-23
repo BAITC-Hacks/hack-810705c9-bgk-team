@@ -12,6 +12,7 @@ COPY --from=pruner /app/out/json/ .
 # `bun install --frozen-lockfile` падает с InvalidLockfile. Берём оригинальный
 # lockfile из контекста: резолюция та же, установка детерминированная.
 COPY --from=pruner /app/bun.lock ./bun.lock
+COPY --from=pruner /app/patches ./patches
 RUN bun install --frozen-lockfile
 
 FROM installer AS builder
