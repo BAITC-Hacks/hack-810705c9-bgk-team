@@ -1,16 +1,10 @@
-# ADR-009 implementation prompt
+# ADR-009: REST-контракты BFF
 
-**Модуль:** REST BFF contracts.
+Реализуй [ADR-009](../009-bff-api-contract.md): общие Zod-контракты, тонкие route handlers и единый формат ошибок. Используй существующие use-case; не дублируй бизнес-логику в маршрутах. Не держи транзакцию открытой во время вызова Mastra.
 
-Implement ADR-009 in presentation-layer: shared Zod request/response contracts, consistent Russian error envelope/status mapping, thin route handlers, and transaction boundaries outside Mastra calls. Follow the exact endpoint table in the MVP spec plus the three explicitly listed clarifications in ADR-009. Read ADR-004–008 contracts and current implementations first; do not reimplement use-cases in handlers. Keep server component reads on shared query functions and mutations through the agreed route/use-case path. Coordinate API shapes before touching UI consumers. Keep all ownership checks via ADR-008 actor. Avoid new API framework/dependencies.
+## Правила работы
 
-## Общие правила выполнения
-
-Работай только в отдельном Git worktree. До изменений проверь `git status`, текущую ветку и незакоммиченные файлы; ничего чужого не сбрасывай, не чисти и не коммить из исходной рабочей копии. Создай worktree и свою feature-ветку от актуальной ветки интеграции, используя `git worktree add ../hack-810705c9-adr-009 -b feature/adr-009-<короткое-имя> <base-branch>`. Сначала проверь `git worktree list` и `git branch --show-current`; не используй уже занятый путь/ветку.
-
-В worktree перечитай корневой `AGENTS.md`, соответствующий `docs/adr/009-*.md`, связанные ADR и только нужные разделы спецификации/архитектуры. ADR Proposed — план реализации, а не утверждение новых требований: следуй ему, фиксируй неразрешённые вопросы как допущения и не меняй ADR статус/содержание. Сверь рабочее дерево после создания: worktree может не содержать незакоммиченные изменения исходной папки. Если необходимая зависимая реализация ещё не попала в base branch, не копируй её вручную и не переписывай: подготовь совместимый узкий интерфейс, явно укажи блокирующую зависимость и продолжай независимую часть.
-
-Делай компактную реализацию только в согласованном модуле, следуй существующим версиям и паттернам. Не читай секреты и не выводи значения `.env`. Не добавляй инфраструктуру/зависимости без необходимости. По завершении проверь diff, выполни только целевые проверки изменённого потока и нужные type/lint команды; не запускай тесты по умолчанию, если они не требуются для реализации или не запрошены. Не публикуй, не пушь, не деплой и не мержи. Оставь изменения в своей ветке и сообщи: что сделано, изменённые файлы, проверки и результат, известные блокеры/допущения, имя ветки и путь worktree. Не удаляй worktree.
-
-## Задача ADR-009
-
+1. Прочитай корневой `AGENTS.md`, этот ADR и только нужный контекст проекта. ADR со статусом Proposed не меняй; открытые продуктовые вопросы отметь как допущения.
+2. Работай в отдельном Git worktree и feature-ветке от согласованной актуальной базы. Сначала проверь `git status` и `git worktree list`; не затрагивай чужие изменения.
+3. Реализуй только этот ADR, переиспользуй существующий код и зависимости. Перед правкой общей схемы БД согласуй миграцию с её владельцем.
+4. Проверь diff и изменённый поток подходящими проверками. Не пушь, не мержи и не деплой. Оставь работу в ветке/worktree и сообщи кратко: результат, файлы, проверки, ветку и блокеры.
