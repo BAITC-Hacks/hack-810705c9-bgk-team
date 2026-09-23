@@ -24,6 +24,7 @@ import type {
   PanelImperativeHandle,
 } from "react-resizable-panels";
 import { toast } from "sonner";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   calculateScore,
@@ -722,10 +723,9 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
     >
       <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-4 sm:gap-3 lg:px-6">
         <div className="flex min-w-0 items-center gap-4">
-          <button
-            type="button"
-            onClick={() => setShowHelp(true)}
-            aria-label="О AI-Sana"
+          <Link
+            href="/onboarding"
+            aria-label="Вернуться к знакомству с платформой"
             data-logo-trigger
             className="flex h-9 shrink-0 items-center rounded focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
           >
@@ -733,7 +733,7 @@ function WorkspaceContent({ data, setData, session, onSessionChange, onReload }:
               aria-hidden="true"
               className="h-auto w-20 min-[375px]:w-24 sm:w-28"
             />
-          </button>
+          </Link>
           <span className="hidden h-5 w-px bg-border sm:block" />
           <span className="hidden items-center gap-3 text-[13px] font-medium text-muted-foreground xl:flex">
             Рабочее пространство
