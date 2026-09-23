@@ -1,6 +1,25 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import {
+  ArrowsExpand,
+  FileText,
+  Keyboard,
+  LayoutSideContentLeft,
+  LayoutSideContentRight,
+  Xmark,
+} from "@gravity-ui/icons";
+import type {
+  GroupImperativeHandle,
+  Layout,
+  PanelImperativeHandle,
+} from "react-resizable-panels";
 import { toast } from "sonner";
 import {
   calculateScore,
@@ -13,11 +32,22 @@ import {
   type TaskField,
   type WorkspaceData,
 } from "@/entities/workspace";
-import { TaskEditor } from "@/features/task-editor";
+import { TaskEditor, type TaskEditorDraft } from "@/features/task-editor";
 import { TaskInspector } from "@/features/task-inspector";
 import { StudentCatalog } from "@/features/student-catalog";
 import { TeamPicker } from "@/features/team-picker";
 import { Button } from "@/shared/components/ui/button";
+import { IconAction } from "@/shared/components/icon-action";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+} from "@/shared/components/ui/sheet";
+import {
+  isTextEditing,
+  shouldHandleShortcut,
+} from "@/shared/lib/keyboard-shortcuts";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +63,7 @@ import {
 import { Toaster } from "@/shared/components/ui/sonner";
 import { cn } from "@/shared/lib/utils";
 import { ChatPanel } from "./chat-panel";
+import { CHAT_SKILLS, runChatSkill, type ChatSkillId } from "./chat-skills";
 import { NewTaskDialog } from "./new-task-dialog";
 import { TaskNavigation } from "./task-navigation";
 
@@ -44,6 +75,16 @@ function subscribeCompact(onChange: () => void) {
 }
 const getCompact = () => window.matchMedia(COMPACT_QUERY).matches;
 const getServerCompact = () => false;
+const DEFAULT_LAYOUT: Layout = {
+  "task-navigation": 16,
+  "task-conversation": 60,
+  "task-inspector": 24,
+};
+const FOCUS_LAYOUT: Layout = {
+  "task-navigation": 0,
+  "task-conversation": 100,
+  "task-inspector": 0,
+};
 
 export default function WorkspacePage() {
   const [data, setData] = useState<WorkspaceData>(getDemoData);
@@ -51,7 +92,8 @@ export default function WorkspacePage() {
   const [selectedId, setSelectedId] = useState("bakery-waste");
   const [teamId, setTeamId] = useState(() => getDemoData().teams[0].id);
   const [status, setStatus] = useState<"published" | "draft">("published");
-  const [tab, setTab] = useState<"assistant" | "card">("assistant");
+  const [cardOpen, setCardOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [conversations, setConversations] = useState<Record<string, Message[]>>(
     {},
@@ -60,8 +102,19 @@ export default function WorkspacePage() {
   const [resetGeneration, setResetGeneration] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
   const [showDemo, setShowDemo] = useState(false);
-  const [mobilePane, setMobilePane] = useState<"tasks" | "chat" | "details">(
-    "chat",
+  const [focusMode, setFocusMode] = useState(false);
+  const [navigationCollapsed, setNavigationCollapsed] = useState(false);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const panelsRef = useRef<GroupImperativeHandle>(null);
+  const navigationRef = useRef<PanelImperativeHandle>(null);
+  const inspectorRef = useRef<PanelImperativeHandle>(null);
+  const editorContentRef = useRef<HTMLDivElement>(null);
+  const mobileContentRef = useRef<HTMLDivElement>(null);
+  const editorReturnFocus = useRef<HTMLElement | null>(null);
+  const editorDrafts = useRef(new Map<string, TaskEditorDraft>());
+  const previousLayout = useRef<Layout | undefined>(undefined);
+  const [mobileDrawer, setMobileDrawer] = useState<"tasks" | "details" | null>(
+    null,
   );
   const compact = useSyncExternalStore(
     subscribeCompact,
@@ -84,8 +137,11 @@ export default function WorkspacePage() {
     ).length * 10;
 
   function changeRole(next: Role) {
+    if (next === role) return;
+    setFocusMode(false);
     setRole(next);
-    setTab("assistant");
+    setCardOpen(false);
+    setMobileDrawer(null);
     setQuery("");
     setStatus("published");
     if (task.status !== "published")
@@ -94,13 +150,118 @@ export default function WorkspacePage() {
       );
   }
 
+  function toggleFocus() {
+    const panels = panelsRef.current;
+    if (!panels) return;
+    if (focusMode) {
+      panels.setLayout(previousLayout.current ?? DEFAULT_LAYOUT);
+    } else {
+      previousLayout.current = panels.getLayout();
+      panels.setLayout(FOCUS_LAYOUT);
+    }
+    setFocusMode(!focusMode);
+  }
+
+  function toggleNavigation() {
+    if (compact) {
+      setMobileDrawer((current) => (current === "tasks" ? null : "tasks"));
+      return;
+    }
+    setFocusMode(false);
+    if (navigationRef.current?.isCollapsed()) navigationRef.current.expand();
+    else navigationRef.current?.collapse();
+  }
+
+  function toggleProposals() {
+    if (compact) {
+      setMobileDrawer((current) => (current === "details" ? null : "details"));
+      return;
+    }
+    setFocusMode(false);
+    if (inspectorRef.current?.isCollapsed()) inspectorRef.current.expand();
+    else inspectorRef.current?.collapse();
+  }
+
+  function showProposals() {
+    if (compact) setMobileDrawer("details");
+    else {
+      setFocusMode(false);
+      inspectorRef.current?.expand();
+    }
+  }
+
+  function openCard() {
+    editorReturnFocus.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    setMobileDrawer(null);
+    setCardOpen(true);
+  }
+
+  const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
+    const scope = cardOpen
+      ? editorContentRef.current
+      : mobileDrawer
+        ? mobileContentRef.current
+        : null;
+    if (!shouldHandleShortcut(event, scope)) return;
+    if (role === "business" && event.altKey && !event.shiftKey) {
+      if (cardOpen && event.code !== "Digit2") return;
+      if (
+        mobileDrawer &&
+        event.code !== (mobileDrawer === "tasks" ? "Digit1" : "Digit3")
+      )
+        return;
+      const actions: Record<string, () => void> = {
+        Digit1: toggleNavigation,
+        Digit2: () => (cardOpen ? setCardOpen(false) : openCard()),
+        Digit3: toggleProposals,
+        ...(!compact ? { Digit0: toggleFocus } : {}),
+      };
+      if (actions[event.code]) {
+        event.preventDefault();
+        actions[event.code]();
+      }
+      return;
+    }
+    if (cardOpen || mobileDrawer) return;
+    if (
+      role === "business" &&
+      (event.ctrlKey || event.metaKey) &&
+      !event.altKey &&
+      !event.shiftKey &&
+      event.code === "KeyK"
+    ) {
+      event.preventDefault();
+      document.getElementById("chat-message")?.focus();
+    } else if (
+      event.key === "?" &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      !isTextEditing(event.target)
+    ) {
+      event.preventDefault();
+      setShortcutsOpen(true);
+    } else if (event.key === "Escape" && focusMode) {
+      event.preventDefault();
+      toggleFocus();
+    }
+  });
+  useEffect(() => {
+    document.addEventListener("keydown", handleShortcut);
+    return () => document.removeEventListener("keydown", handleShortcut);
+  }, []);
+
   function selectTask(id: string) {
     setSelectedId(id);
-    setTab("assistant");
-    setMobilePane("chat");
+    setCardOpen(false);
+    setMobileDrawer(null);
   }
 
   function saveTask(next: Task) {
+    editorDrafts.current.delete(next.id);
     setData((current) => ({
       ...current,
       tasks: current.tasks.map((item) => (item.id === next.id ? next : item)),
@@ -121,9 +282,11 @@ export default function WorkspacePage() {
       });
   }
 
-  function sendMessage(text: string, field?: TaskField) {
+  function sendMessage(text: string, field?: TaskField, skill?: ChatSkillId) {
     let response = "";
-    if (field) {
+    if (skill) {
+      response = runChatSkill(task, data.proposals, data.teams, skill, text);
+    } else if (field) {
       const label = TASK_FIELDS.find((item) => item.key === field)?.label;
       const update = (item: Task): Task => ({
         ...item,
@@ -152,7 +315,13 @@ export default function WorkspacePage() {
       ...current,
       [conversationKey]: [
         ...(current[conversationKey] ?? []),
-        { id: crypto.randomUUID(), role: "user", content: text },
+        {
+          id: crypto.randomUUID(),
+          role: "user",
+          content: skill
+            ? `@${CHAT_SKILLS.find((item) => item.id === skill)?.label}${text ? `\n${text}` : ""}`
+            : text,
+        },
         { id: crypto.randomUUID(), role: "assistant", content: response },
       ],
     }));
@@ -163,6 +332,7 @@ export default function WorkspacePage() {
     setData(next);
     setConversations({});
     setTaskDrafts({});
+    editorDrafts.current.clear();
     setResetGeneration((current) => current + 1);
     setShowCreate(false);
     setRole("business");
@@ -170,9 +340,11 @@ export default function WorkspacePage() {
     setTeamId(next.teams[0].id);
     setQuery("");
     setStatus("published");
-    setTab("assistant");
+    setCardOpen(false);
+    setShortcutsOpen(false);
     setShowDemo(false);
-    setMobilePane("chat");
+    setFocusMode(false);
+    setMobileDrawer(null);
     toast.success("Демонстрация начата заново");
   }
 
@@ -182,6 +354,7 @@ export default function WorkspacePage() {
       selectedId={task.id}
       onSelect={selectTask}
       onCreate={() => setShowCreate(true)}
+      onClose={toggleNavigation}
       query={query}
       onQuery={setQuery}
       status={status}
@@ -196,100 +369,82 @@ export default function WorkspacePage() {
   const center = (
     <main
       className="workspace-panel flex flex-col bg-card"
-      aria-label="Работа с задачей"
+      aria-label="Чат по задаче"
     >
-      <div className="shrink-0 px-6 pt-5 lg:px-7">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="mb-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <span>{task.industry}</span>
-              <span className="text-border">/</span>
-              <span className="truncate">{task.company}</span>
-            </div>
-            <h1 className="text-[20px] leading-snug font-semibold tracking-[-.6px] xl:text-[23px]">
-              {task.title}
-            </h1>
+      <header className="flex shrink-0 items-center gap-3 border-b px-4 py-3 lg:px-5">
+        <div className="min-w-0 flex-1">
+          <h1
+            className="truncate text-lg font-bold tracking-tight"
+            title={task.title}
+          >
+            {task.title}
+          </h1>
+          <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+            <span className="truncate">Чат по задаче · {task.company}</span>
+            <span className="hidden shrink-0 sm:inline">
+              ·{" "}
+              {hasDraftEdits
+                ? "Есть изменения"
+                : task.status === "published"
+                  ? "Опубликована"
+                  : "Черновик"}
+            </span>
           </div>
-          <span className="mt-1 shrink-0 text-[11px] text-muted-foreground">
-            {hasDraftEdits
-              ? "Есть изменения"
-              : task.status === "published"
-                ? "Опубликована"
-                : "Черновик"}
-          </span>
         </div>
         <div
-          role="tablist"
-          aria-label="Содержание задачи"
-          className="mt-5 flex gap-6 border-b"
+          className="flex shrink-0 items-center gap-0.5"
+          role="group"
+          aria-label="Панели задачи"
         >
-          {(
-            [
-              ["assistant", "Ассистент"],
-              ["card", "Карточка задачи"],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              id={`tab-${value}`}
-              role="tab"
-              type="button"
-              key={value}
-              aria-selected={tab === value}
-              aria-controls="task-content"
-              tabIndex={tab === value ? 0 : -1}
-              onKeyDown={(event) => {
-                if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-                  const next = tab === "assistant" ? "card" : "assistant";
-                  setTab(next);
-                  document.getElementById(`tab-${next}`)?.focus();
-                }
-              }}
-              onClick={() => setTab(value)}
-              className={cn(
-                "border-b-2 px-0.5 pt-1 pb-3 text-[12px] transition-colors focus-visible:outline-2 focus-visible:outline-primary",
-                tab === value
-                  ? "border-primary font-medium text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
+          <IconAction
+            label="Список задач"
+            shortcut="Alt + 1"
+            aria-keyshortcuts="Alt+1"
+            aria-pressed={!compact && !navigationCollapsed}
+            onClick={toggleNavigation}
+          >
+            <LayoutSideContentLeft className="size-4" />
+          </IconAction>
+          <IconAction
+            label="Карточка задачи"
+            shortcut="Alt + 2"
+            aria-keyshortcuts="Alt+2"
+            aria-expanded={cardOpen}
+            onClick={openCard}
+          >
+            <FileText className="size-4" />
+          </IconAction>
+          <IconAction
+            label="Отклики команд"
+            shortcut="Alt + 3"
+            aria-keyshortcuts="Alt+3"
+            aria-pressed={!compact && !inspectorCollapsed}
+            onClick={toggleProposals}
+          >
+            <LayoutSideContentRight className="size-4" />
+          </IconAction>
+          {!compact && (
+            <IconAction
+              label={focusMode ? "Вернуть панели" : "Развернуть чат"}
+              shortcut="Alt + 0"
+              aria-keyshortcuts="Alt+0"
+              aria-pressed={focusMode}
+              onClick={toggleFocus}
             >
-              {label}
-            </button>
-          ))}
-          {tab === "assistant" && (
-            <button
-              type="button"
-              onClick={() => setTab("card")}
-              className="ml-auto mb-2 hidden items-center gap-1 text-[10px] text-primary xl:flex"
-            >
-              {task.status === "draft" ? "К публикации" : "Улучшить"}
-            </button>
+              <ArrowsExpand className="size-4" />
+            </IconAction>
           )}
         </div>
-      </div>
-      <div
-        id="task-content"
-        role="tabpanel"
-        aria-labelledby={`tab-${tab}`}
-        className="flex min-h-0 flex-1 flex-col"
-      >
-        {tab === "assistant" ? (
-          <ChatPanel
-            key={task.id}
-            task={task}
-            messages={messages}
-            onSend={sendMessage}
-            onEdit={() => setTab("card")}
-          />
-        ) : (
-          <TaskEditor
-            key={task.id}
-            task={task}
-            savedTask={canonicalTask}
-            onSave={saveTask}
-            onCancel={() => setTab("assistant")}
-          />
-        )}
-      </div>
+      </header>
+      <ChatPanel
+        key={task.id}
+        task={task}
+        messages={messages}
+        onSend={sendMessage}
+        onEdit={openCard}
+        onShowProposals={showProposals}
+        onShowShortcuts={() => setShortcutsOpen(true)}
+      />
     </main>
   );
   const inspector = (
@@ -299,10 +454,8 @@ export default function WorkspacePage() {
       teams={data.teams}
       proposals={data.proposals}
       activeTeamId={teamId}
-      onEditTask={() => {
-        setTab("card");
-        setMobilePane("chat");
-      }}
+      onEditTask={openCard}
+      onClose={toggleProposals}
       onDecision={(id, decision) => {
         setData((current) => ({
           ...current,
@@ -362,7 +515,7 @@ export default function WorkspacePage() {
       key={resetGeneration}
       className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background"
     >
-      <header className="flex h-16 shrink-0 items-center justify-between gap-4 border-b px-5 lg:px-7">
+      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b px-4 lg:px-6">
         <div className="flex min-w-0 items-center gap-4">
           <button
             type="button"
@@ -370,12 +523,12 @@ export default function WorkspacePage() {
             aria-label="О AI-Sana"
             className="flex items-center gap-1.5 rounded focus-visible:outline-2 focus-visible:outline-primary"
           >
-            <span className="text-xl leading-none font-semibold tracking-tight">
+            <span className="text-[23px] leading-none font-bold tracking-[-.7px]">
               AI-Sana
             </span>
           </button>
           <span className="hidden h-5 w-px bg-border sm:block" />
-          <span className="hidden items-center gap-3 text-[11px] text-muted-foreground xl:flex">
+          <span className="hidden items-center gap-3 text-[13px] font-medium text-muted-foreground xl:flex">
             Рабочее пространство
           </span>
         </div>
@@ -395,9 +548,9 @@ export default function WorkspacePage() {
               aria-pressed={role === value}
               onClick={() => changeRole(value)}
               className={cn(
-                "flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[11px] transition-all sm:px-5",
+                "flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors sm:px-5",
                 role === value
-                  ? "bg-card font-medium text-primary shadow-sm ring-1 ring-primary/5"
+                  ? "bg-card text-primary shadow-sm ring-1 ring-primary/5"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
@@ -405,44 +558,30 @@ export default function WorkspacePage() {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1">
+          <IconAction
+            label="Горячие клавиши"
+            shortcut="?"
+            onClick={() => setShortcutsOpen(true)}
+          >
+            <Keyboard className="size-4" />
+          </IconAction>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => setShowDemo(true)}
-            className="h-7 gap-1.5 bg-transparent px-2 text-[10px]"
+            className="h-8 gap-1.5 bg-transparent px-2 text-xs font-semibold"
           >
             Демо
           </Button>
           <div
             title={role === "business" ? "Представитель бизнеса" : team.name}
-            className="hidden size-8 items-center justify-center rounded-full bg-secondary text-[10px] font-medium text-primary sm:flex"
+            className="hidden size-8 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-primary sm:flex"
           >
             {role === "business" ? "Б" : team.initials}
           </div>
         </div>
       </header>
-      {role === "business" && compact && (
-        <div className="flex shrink-0 gap-1 px-3 pb-2">
-          {(
-            [
-              ["tasks", "Задачи"],
-              ["chat", "Ассистент"],
-              ["details", "Отклики"],
-            ] as const
-          ).map(([value, label]) => (
-            <Button
-              key={value}
-              variant={mobilePane === value ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => setMobilePane(value)}
-              className="flex-1 text-[11px]"
-            >
-              {label}
-            </Button>
-          ))}
-        </div>
-      )}
       <div className={cn("min-h-0 flex-1", role === "business" && "p-3")}>
         {role === "student" ? (
           <StudentCatalog
@@ -475,41 +614,65 @@ export default function WorkspacePage() {
             {inspector}
           </StudentCatalog>
         ) : compact ? (
-          <div className="h-full">
-            {mobilePane === "tasks" ? (
-              navigation
-            ) : mobilePane === "chat" ? (
-              center
-            ) : (
-              <div className="workspace-panel bg-workspace-surface">
-                {inspector}
-              </div>
-            )}
-          </div>
+          center
         ) : (
-          <ResizablePanelGroup orientation="horizontal" className="gap-0">
+          <ResizablePanelGroup
+            orientation="horizontal"
+            className="gap-0"
+            groupRef={panelsRef}
+            defaultLayout={focusMode ? FOCUS_LAYOUT : DEFAULT_LAYOUT}
+            disabled={focusMode}
+          >
             <ResizablePanel
               id="task-navigation"
-              defaultSize="19%"
-              minSize="215px"
-              maxSize="28%"
+              panelRef={navigationRef}
+              defaultSize="16%"
+              minSize="208px"
+              maxSize="26%"
+              collapsible
+              collapsedSize={0}
+              onResize={(size) =>
+                setNavigationCollapsed(size.asPercentage === 0)
+              }
+              inert={focusMode || navigationCollapsed}
+              aria-hidden={focusMode || navigationCollapsed || undefined}
             >
               {navigation}
             </ResizablePanel>
-            <ResizableHandle className="w-2.5 bg-transparent after:w-2.5 hover:after:bg-primary/5" />
+            <ResizableHandle
+              aria-label="Ширина списка задач"
+              className={cn(
+                "w-2.5 bg-transparent after:w-2.5 hover:after:bg-primary/5",
+                focusMode && "hidden",
+              )}
+            />
             <ResizablePanel
               id="task-conversation"
-              defaultSize="51%"
-              minSize="380px"
+              defaultSize="60%"
+              minSize="480px"
             >
               {center}
             </ResizablePanel>
-            <ResizableHandle className="w-2.5 bg-transparent after:w-2.5 hover:after:bg-primary/5" />
+            <ResizableHandle
+              aria-label="Ширина панели откликов"
+              className={cn(
+                "w-2.5 bg-transparent after:w-2.5 hover:after:bg-primary/5",
+                focusMode && "hidden",
+              )}
+            />
             <ResizablePanel
               id="task-inspector"
-              defaultSize="30%"
+              panelRef={inspectorRef}
+              defaultSize="24%"
               minSize="310px"
               maxSize="42%"
+              collapsible
+              collapsedSize={0}
+              onResize={(size) =>
+                setInspectorCollapsed(size.asPercentage === 0)
+              }
+              inert={focusMode || inspectorCollapsed}
+              aria-hidden={focusMode || inspectorCollapsed || undefined}
             >
               <div className="workspace-panel bg-workspace-surface">
                 {inspector}
@@ -518,6 +681,127 @@ export default function WorkspacePage() {
           </ResizablePanelGroup>
         )}
       </div>
+      <Sheet open={cardOpen && role === "business"} onOpenChange={setCardOpen}>
+        <SheetContent
+          ref={editorContentRef}
+          showCloseButton={false}
+          className="gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-[600px]"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const previous = editorReturnFocus.current;
+            if (previous?.isConnected && !previous.closest("[inert]"))
+              previous.focus();
+            else document.getElementById("chat-message")?.focus();
+          }}
+        >
+          <SheetTitle className="sr-only">Карточка задачи</SheetTitle>
+          <SheetDescription className="sr-only">
+            Редактирование и подтверждение сведений перед публикацией.
+          </SheetDescription>
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b px-5 py-3">
+            <span className="truncate text-sm font-semibold" title={task.title}>
+              {task.title}
+            </span>
+            <IconAction
+              label="Закрыть карточку"
+              shortcut="Esc · Alt + 2"
+              onClick={() => setCardOpen(false)}
+            >
+              <Xmark className="size-4" />
+            </IconAction>
+          </div>
+          <div className="min-h-0 flex-1">
+            <TaskEditor
+              key={task.id}
+              task={task}
+              savedTask={canonicalTask}
+              draftCache={editorDrafts.current}
+              onSave={saveTask}
+              onCancel={() => setCardOpen(false)}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+      <Sheet
+        open={compact && mobileDrawer !== null && role === "business"}
+        onOpenChange={(open) => {
+          if (!open) setMobileDrawer(null);
+        }}
+      >
+        <SheetContent
+          ref={mobileContentRef}
+          side={mobileDrawer === "tasks" ? "left" : "right"}
+          showCloseButton={false}
+          className="gap-0 p-0 data-[side=left]:w-full data-[side=right]:w-full data-[side=left]:sm:max-w-[380px] data-[side=right]:sm:max-w-[420px] [&_.workspace-panel]:rounded-none [&_.workspace-panel]:border-0"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            document.getElementById("chat-message")?.focus();
+          }}
+        >
+          <SheetTitle className="sr-only">
+            {mobileDrawer === "tasks" ? "Мои задачи" : "Отклики команд"}
+          </SheetTitle>
+          <SheetDescription className="sr-only">
+            Панель текущей задачи. Escape закрывает панель и возвращает в чат.
+          </SheetDescription>
+          {mobileDrawer === "tasks" ? navigation : inspector}
+        </SheetContent>
+      </Sheet>
+      <Dialog open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
+        <DialogContent className="p-6 sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold">
+              Горячие клавиши
+            </DialogTitle>
+            <DialogDescription>
+              Быстрые действия в режиме{" "}
+              {role === "business" ? "бизнеса" : "студента"}.
+            </DialogDescription>
+          </DialogHeader>
+          <dl className="mt-2 divide-y text-sm">
+            {[
+              [
+                "Ctrl / ⌘ + K",
+                role === "business"
+                  ? "Перейти к сообщению"
+                  : "Поиск по каталогу",
+              ],
+              ...(role === "business"
+                ? [["Alt + 1", "Показать / скрыть задачи"]]
+                : []),
+              ["Alt + 2", "Открыть / закрыть карточку"],
+              [
+                "Alt + 3",
+                role === "business"
+                  ? "Показать / скрыть отклики"
+                  : "Открыть / закрыть команды",
+              ],
+              ...(role === "business" && !compact
+                ? [["Alt + 0", "Развернуть / свернуть чат"]]
+                : []),
+              ...(role === "business"
+                ? [
+                    ["@", "Действия ассистента в сообщении"],
+                    ["↑ ↓ · Enter / Tab", "Выбрать действие из @-меню"],
+                    ["Shift + Enter", "Новая строка в сообщении"],
+                  ]
+                : []),
+              ["Esc", "Закрыть меню или верхнюю панель"],
+              ["?", "Эта подсказка вне поля ввода"],
+            ].map(([keys, description]) => (
+              <div
+                key={keys}
+                className="flex items-center justify-between gap-4 py-3"
+              >
+                <dt>{description}</dt>
+                <dd className="shrink-0 rounded border bg-muted px-2 py-1 text-xs font-medium">
+                  {keys}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </DialogContent>
+      </Dialog>
       <NewTaskDialog
         open={showCreate}
         onOpenChange={setShowCreate}

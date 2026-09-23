@@ -20,6 +20,7 @@ import {
   type Team,
 } from "@/entities/workspace";
 import { Button } from "@/shared/components/ui/button";
+import { IconAction } from "@/shared/components/icon-action";
 import {
   Dialog,
   DialogClose,
@@ -51,6 +52,7 @@ export type TaskInspectorProps = {
   onApply: (input: ApplicationInput) => void;
   onMilestone: (id: string) => void;
   onEditTask: () => void;
+  onClose?: () => void;
 };
 
 const proposalStatus = {
@@ -72,7 +74,7 @@ function safePrototypeUrl(value: string): string | null {
 
 function StatusLabel({ status }: { status: Proposal["status"] }) {
   return (
-    <span className="text-xs font-medium text-foreground">
+    <span className="text-xs font-semibold text-foreground">
       {proposalStatus[status]}
     </span>
   );
@@ -83,7 +85,7 @@ function TeamAvatar({ team, small = false }: { team: Team; small?: boolean }) {
     <div
       aria-hidden="true"
       className={cn(
-        "flex shrink-0 items-center justify-center rounded-md bg-muted font-medium text-foreground",
+        "flex shrink-0 items-center justify-center rounded-lg bg-muted font-semibold text-foreground",
         small ? "size-8 text-xs" : "size-10 text-sm",
       )}
     >
@@ -102,25 +104,25 @@ function ProposalDetails({ proposal }: { proposal: Proposal }) {
   return (
     <div className="space-y-5">
       <section className="space-y-2">
-        <h4 className="text-xs font-semibold">Идея решения</h4>
-        <p className="whitespace-pre-line break-words text-[13px] leading-relaxed text-foreground/80">
+        <h4 className="text-sm font-semibold">Идея решения</h4>
+        <p className="whitespace-pre-line break-words text-sm leading-relaxed text-foreground/85">
           {proposal.idea}
         </p>
       </section>
       <section className="space-y-2.5">
-        <h4 className="text-xs font-semibold">План работы</h4>
+        <h4 className="text-sm font-semibold">План работы</h4>
         <ol className="list-decimal space-y-2.5 pl-4 marker:text-muted-foreground">
           {steps.map((step, index) => (
             <li
               key={`${index}-${step}`}
-              className="break-words pl-1 text-[13px] leading-relaxed text-foreground/80"
+              className="break-words pl-1 text-sm leading-relaxed text-foreground/85"
             >
               {step}
             </li>
           ))}
         </ol>
       </section>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-[13px]">
         <span className="min-w-0 break-words text-muted-foreground">
           Срок: {proposal.timeline}
         </span>
@@ -129,7 +131,7 @@ function ProposalDetails({ proposal }: { proposal: Proposal }) {
             href={prototypeUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 rounded-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+            className="inline-flex items-center gap-1 rounded-sm font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
           >
             Демо-прототип{" "}
             <ArrowUpRight className="size-3.5" aria-hidden="true" />
@@ -150,6 +152,7 @@ function BusinessInspector({
   onDecision,
   onMilestone,
   onEditTask,
+  onClose,
 }: TaskInspectorProps) {
   const [view, setView] = useState<"cards" | "list">("cards");
   const [activeProposalId, setActiveProposalId] = useState<string | null>(null);
@@ -170,54 +173,55 @@ function BusinessInspector({
 
   return (
     <>
-      <div className="flex items-start justify-between gap-2 px-5 pb-5 pt-6">
+      <div className="flex min-h-14 shrink-0 items-center justify-between gap-2 border-b px-4 py-3">
         <div className="min-w-0">
           <h2
             id="inspector-title"
-            className="flex items-center gap-2 text-[15px] font-semibold tracking-tight"
+            className="flex items-center gap-2 text-base font-bold tracking-tight"
           >
-            Команды и отклики{" "}
-            <span className="text-xs font-normal text-muted-foreground">
+            Отклики{" "}
+            <span className="text-xs font-medium tabular-nums text-muted-foreground">
               {taskProposals.length}
             </span>
           </h2>
-          <p className="mt-1.5 text-xs text-muted-foreground">
-            Вы выбираете, с кем работать
-          </p>
         </div>
         <div
           role="group"
-          aria-label="Вид откликов"
+          aria-label="Действия с откликами"
           className="flex shrink-0 gap-0.5"
         >
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Карточки откликов"
+          <IconAction
+            label="Карточки откликов"
             aria-pressed={view === "cards"}
             className={cn(view === "cards" && "bg-muted text-foreground")}
             onClick={() => setView("cards")}
           >
             <LayoutCellsLarge className="size-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Список откликов"
+          </IconAction>
+          <IconAction
+            label="Список откликов"
             aria-pressed={view === "list"}
             className={cn(view === "list" && "bg-muted text-foreground")}
             onClick={() => setView("list")}
           >
             <LayoutList className="size-4" />
-          </Button>
+          </IconAction>
+          {onClose ? (
+            <IconAction label="Скрыть отклики" shortcut="Alt+3" onClick={onClose}>
+              <Xmark className="size-4" aria-hidden="true" />
+            </IconAction>
+          ) : null}
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5">
+      <div
+        key={`${view}-${proposal?.id ?? "empty"}`}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5"
+      >
         {!proposal ? (
           <div className="flex min-h-72 flex-col items-center justify-center px-5 py-9 text-center">
-            <h3 className="text-sm font-semibold">Пока без откликов</h3>
-            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+            <h3 className="text-base font-semibold">Пока без откликов</h3>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
               {task.status === "draft"
                 ? "Опубликуйте задачу, чтобы команды могли предложить своё решение."
                 : "Здесь будут идеи и планы команд. Первый отклик можно отправить в режиме студента."}
@@ -253,7 +257,7 @@ function BusinessInspector({
                       <h3 className="truncate text-sm font-semibold">
                         {proposalTeam?.name ?? "Команда"}
                       </h3>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      <p className="mt-0.5 text-xs text-muted-foreground">
                         {proposalTeam?.members ?? 0} в команде
                       </p>
                     </div>
@@ -262,7 +266,7 @@ function BusinessInspector({
                       aria-hidden="true"
                     />
                   </div>
-                  <p className="mb-3 mt-3 line-clamp-2 break-words text-xs leading-relaxed text-muted-foreground">
+                  <p className="mb-3 mt-3 line-clamp-2 break-words text-sm leading-relaxed text-muted-foreground">
                     {item.idea}
                   </p>
                   <StatusLabel status={item.status} />
@@ -271,131 +275,127 @@ function BusinessInspector({
             })}
           </div>
         ) : (
-          <>
-            <article
-              className="py-1"
-              aria-label={`Отклик команды ${team?.name ?? "Команда"}`}
-            >
-              <div className="mb-4 border-b pb-4">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  {team ? <TeamAvatar team={team} /> : null}
-                  {proposal.status !== "pending" ? (
-                    <StatusLabel status={proposal.status} />
-                  ) : (
-                    <span className="text-[10px] text-muted-foreground">
-                      Отклик команды
-                    </span>
-                  )}
-                </div>
-                <h3 className="text-xl font-semibold tracking-tight">
-                  {team?.name ?? "Команда"}
-                </h3>
-                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                  {team?.members ?? 0} в команде ·{" "}
-                  {team?.tagline ?? "Готовы предложить своё решение"}
-                </p>
-                <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-                  {team?.skills.join(" · ")}
-                </p>
+          <article
+            className="py-1"
+            aria-label={`Отклик команды ${team?.name ?? "Команда"}`}
+          >
+            <div className="mb-4 border-b pb-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                {team ? <TeamAvatar team={team} /> : null}
+                {proposal.status !== "pending" ? (
+                  <StatusLabel status={proposal.status} />
+                ) : (
+                  <span className="text-xs text-muted-foreground">
+                    Отклик команды
+                  </span>
+                )}
               </div>
-              <ProposalDetails proposal={proposal} />
-              <div className="mt-5" aria-live="polite">
-                {proposal.status === "pending" ? (
-                  <div className="grid grid-cols-[0.85fr_1.15fr] gap-2">
+              <h3 className="break-words text-[22px] font-bold leading-tight tracking-tight">
+                {team?.name ?? "Команда"}
+              </h3>
+              <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
+                {team?.members ?? 0} в команде ·{" "}
+                {team?.tagline ?? "Готовы предложить своё решение"}
+              </p>
+              <p className="mt-3 text-xs font-medium leading-relaxed text-foreground/75">
+                {team?.skills.join(" · ")}
+              </p>
+            </div>
+            <ProposalDetails proposal={proposal} />
+            {proposal.status === "selected" ? (
+              <div className="mt-5 border-t pt-4" aria-live="polite">
+                {proposal.milestoneConfirmed ? (
+                  <p className="text-[13px] font-semibold text-foreground">
+                    Этап подтверждён · +10 баллов
+                  </p>
+                ) : (
+                  <>
+                    <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
+                      Команда показала результат? Подтвердите этап, чтобы
+                      начислить ей 10 баллов.
+                    </p>
                     <Button
                       variant="outline"
-                      className="h-9 px-2 text-xs"
-                      onClick={() => onDecision(proposal.id, "rejected")}
+                      className="h-10 w-full bg-card text-[13px] font-semibold"
+                      onClick={() => onMilestone(proposal.id)}
                     >
-                      Отклонить
+                      Подтвердить этап
                     </Button>
-                    <Button
-                      className="h-9 gap-1.5 px-2 text-xs"
-                      onClick={() => onDecision(proposal.id, "selected")}
-                    >
-                      Выбрать команду
-                    </Button>
-                  </div>
-                ) : (
-                  <Button
-                    variant="outline"
-                    className="h-9 w-full text-xs"
-                    onClick={() => onDecision(proposal.id, "pending")}
-                  >
-                    <ArrowUturnCcwLeft className="size-4" aria-hidden="true" />
-                    Отменить решение
-                  </Button>
+                  </>
                 )}
-                {proposal.status === "selected" ? (
-                  <div className="mt-4 border-t pt-4">
-                    {proposal.milestoneConfirmed ? (
-                      <p className="text-xs font-medium text-foreground">
-                        Этап подтверждён · +10 баллов
-                      </p>
-                    ) : (
-                      <>
-                        <p className="mb-3 text-[11px] leading-relaxed text-muted-foreground">
-                          Команда показала результат? Подтвердите этап, чтобы
-                          начислить ей 10 баллов.
-                        </p>
-                        <Button
-                          variant="outline"
-                          className="h-8 w-full bg-card text-xs"
-                          onClick={() => onMilestone(proposal.id)}
-                        >
-                          Подтвердить этап
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                ) : null}
               </div>
-            </article>
-            <div
-              className="mt-4 flex items-center justify-center gap-7"
-              aria-label="Навигация по откликам"
-            >
-              <Button
-                variant="outline"
-                size="icon"
-                className="size-9 bg-card/60"
-                aria-label="Предыдущий отклик"
-                disabled={activeIndex === 0}
-                onClick={() =>
-                  setActiveProposalId(taskProposals[activeIndex - 1].id)
-                }
-              >
-                <ChevronLeft className="size-4" />
-              </Button>
-              <span
-                className="min-w-10 text-center text-xs text-muted-foreground"
-                aria-live="polite"
-              >
-                {activeIndex + 1} из {taskProposals.length}
-              </span>
-              <Button
-                variant="outline"
-                size="icon"
-                className="size-9 bg-card/60"
-                aria-label="Следующий отклик"
-                disabled={activeIndex === taskProposals.length - 1}
-                onClick={() =>
-                  setActiveProposalId(taskProposals[activeIndex + 1].id)
-                }
-              >
-                <ChevronRight className="size-4" />
-              </Button>
-            </div>
-          </>
+            ) : null}
+          </article>
         )}
         {taskProposals.length > 0 ? (
-          <p className="mt-5 text-center text-[11px] leading-relaxed text-muted-foreground">
+          <p className="mt-5 text-center text-xs leading-relaxed text-muted-foreground">
             {selectedCount > 0
               ? `Выбрано команд: ${selectedCount}. Можно выбрать ещё.`
               : "Можно выбрать несколько команд или ни одной"}
           </p>
         ) : null}
       </div>
+      {view === "cards" && proposal ? (
+        <footer className="shrink-0 space-y-3 border-t bg-card px-5 py-4">
+          <div aria-live="polite">
+            {proposal.status === "pending" ? (
+              <div className="grid grid-cols-[0.85fr_1.15fr] gap-2">
+                <Button
+                  variant="outline"
+                  className="h-10 px-2 text-[13px] font-semibold"
+                  onClick={() => onDecision(proposal.id, "rejected")}
+                >
+                  Отклонить
+                </Button>
+                <Button
+                  className="h-10 gap-1.5 px-2 text-[13px] font-semibold"
+                  onClick={() => onDecision(proposal.id, "selected")}
+                >
+                  Выбрать команду
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="outline"
+                className="h-10 w-full text-[13px] font-semibold"
+                onClick={() => onDecision(proposal.id, "pending")}
+              >
+                <ArrowUturnCcwLeft className="size-4" aria-hidden="true" />
+                Отменить решение
+              </Button>
+            )}
+          </div>
+          <div
+            className="flex items-center justify-center gap-1.5"
+            aria-label="Навигация по откликам"
+          >
+            <IconAction
+              label="Предыдущий отклик"
+              disabled={activeIndex === 0}
+              onClick={() =>
+                setActiveProposalId(taskProposals[activeIndex - 1].id)
+              }
+            >
+              <ChevronLeft className="size-4" aria-hidden="true" />
+            </IconAction>
+            <span
+              className="min-w-10 text-center text-xs font-medium tabular-nums text-muted-foreground"
+              aria-live="polite"
+            >
+              {activeIndex + 1} из {taskProposals.length}
+            </span>
+            <IconAction
+              label="Следующий отклик"
+              disabled={activeIndex === taskProposals.length - 1}
+              onClick={() =>
+                setActiveProposalId(taskProposals[activeIndex + 1].id)
+              }
+            >
+              <ChevronRight className="size-4" aria-hidden="true" />
+            </IconAction>
+          </div>
+        </footer>
+      ) : null}
     </>
   );
 }
@@ -483,7 +483,7 @@ function ApplicationDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="h-10 w-full text-xs">
+        <Button className="h-11 w-full text-sm font-semibold">
           Предложить решение
         </Button>
       </DialogTrigger>
@@ -502,10 +502,10 @@ function ApplicationDialog({
           </Button>
         </DialogClose>
         <DialogHeader className="pr-6">
-          <DialogTitle className="text-xl font-semibold">
+          <DialogTitle className="text-xl font-bold tracking-tight">
             Предложить решение
           </DialogTitle>
-          <DialogDescription className="pt-1 text-xs leading-relaxed">
+          <DialogDescription className="pt-1 text-sm leading-relaxed">
             {team.name} · {task.title}
           </DialogDescription>
         </DialogHeader>
@@ -527,7 +527,7 @@ function ApplicationDialog({
             };
             return (
               <div key={field.key} className="space-y-1.5">
-                <label htmlFor={shared.id} className="text-xs font-medium">
+                <label htmlFor={shared.id} className="text-sm font-semibold">
                   {field.label}{" "}
                   <span className="text-muted-foreground" aria-hidden="true">
                     *
@@ -558,17 +558,17 @@ function ApplicationDialog({
               </div>
             );
           })}
-          <p className="text-[11px] leading-relaxed text-muted-foreground">
+          <p className="text-xs leading-relaxed text-muted-foreground">
             Все поля обязательны. Бизнес рассмотрит предложение и выберет
             команду самостоятельно.
           </p>
           <DialogFooter className="m-0 gap-2 rounded-none border-0 bg-transparent p-0 pt-2">
             <DialogClose asChild>
-              <Button variant="outline" type="button" className="h-9">
+              <Button variant="outline" type="button" className="h-10 font-semibold">
                 Отмена
               </Button>
             </DialogClose>
-            <Button type="submit" className="h-9">
+            <Button type="submit" className="h-10 font-semibold">
               Отправить отклик
             </Button>
           </DialogFooter>
@@ -594,31 +594,31 @@ function StudentInspector({
 
   return (
     <>
-      <div className="px-5 pb-5 pt-6">
+      <div className="shrink-0 border-b px-5 py-5">
         <h2
           id="inspector-title"
-          className="text-[15px] font-semibold tracking-tight"
+          className="text-base font-bold tracking-tight"
         >
           О задаче
         </h2>
       </div>
-      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-5 pb-5">
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-5 py-5">
         <section>
           <div className="mb-3 flex items-center justify-between gap-2">
             <span className="text-xs text-muted-foreground">
               {task.industry}
             </span>
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               {task.status === "published" ? "Опубликована" : "Черновик"}
             </span>
           </div>
-          <h3 className="text-base font-semibold leading-snug tracking-tight">
+          <h3 className="break-words text-2xl font-bold leading-snug tracking-tight">
             {task.title}
           </h3>
-          <p className="mt-1.5 text-xs text-muted-foreground">{task.company}</p>
+          <p className="mt-2 text-sm font-medium text-muted-foreground">{task.company}</p>
           <div className="mt-5 border-t pt-4">
-            <div className="flex items-center justify-between gap-2 text-xs">
-              <span className="font-medium">Готовность задачи</span>
+            <div className="flex items-center justify-between gap-2 text-sm">
+              <span className="font-semibold">Готовность задачи</span>
               <span className="font-semibold text-primary">
                 {score}{" "}
                 <span className="font-normal text-muted-foreground">/ 100</span>
@@ -637,10 +637,10 @@ function StudentInspector({
                 style={{ width: `${score}%` }}
               />
             </div>
-            <p className="text-xs text-foreground">
+            <p className="text-[13px] font-medium text-foreground">
               {readinessState.label}
             </p>
-            <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
               На опубликованную задачу можно откликнуться при любой готовности и
               уточнить детали вместе с бизнесом.
             </p>
@@ -666,12 +666,12 @@ function StudentInspector({
             },
           ].map(({ label, value }) => (
             <div key={label}>
-              <h3 className="mb-2 text-xs font-semibold">
+              <h3 className="mb-2 text-sm font-semibold">
                 {label}
               </h3>
               <p
                 className={cn(
-                  "break-words text-xs leading-relaxed",
+                  "break-words text-sm leading-relaxed",
                   value.trim()
                     ? "text-foreground/75"
                     : "italic text-muted-foreground",
@@ -684,7 +684,7 @@ function StudentInspector({
         </section>
 
         <details className="group border-t pt-5">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-sm text-xs font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-sm text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
             Все сведения
             <ChevronDown
               className="size-4 text-muted-foreground transition-transform group-open:rotate-180"
@@ -696,10 +696,10 @@ function StudentInspector({
               ({ key }) => !["outcome", "success", "data"].includes(key),
             ).map(({ key, label }) => (
               <div key={key}>
-                <dt className="mb-1.5 text-xs font-semibold">{label}</dt>
+                <dt className="mb-1.5 text-sm font-semibold">{label}</dt>
                 <dd
                   className={cn(
-                    "whitespace-pre-line break-words text-xs leading-relaxed",
+                    "whitespace-pre-line break-words text-sm leading-relaxed",
                     task.fields[key].trim()
                       ? "text-foreground/80"
                       : "italic text-muted-foreground",
@@ -713,15 +713,15 @@ function StudentInspector({
         </details>
 
         <section className="border-t pt-5">
-          <h3 className="mb-3 text-xs font-semibold">
+          <h3 className="mb-3 text-sm font-semibold">
             {proposal ? "Ваш отклик" : "Ваше решение"}
           </h3>
           {team ? (
             <div className="mb-4 flex items-center gap-2.5">
               <TeamAvatar team={team} small />
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{team.name}</p>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                <p className="truncate text-sm font-semibold">{team.name}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
                   {team.members} в команде
                 </p>
               </div>
@@ -730,7 +730,7 @@ function StudentInspector({
           {proposal ? (
             <div className="space-y-4">
               <StatusLabel status={proposal.status} />
-              <p className="text-xs leading-relaxed text-muted-foreground">
+              <p className="text-sm leading-relaxed text-muted-foreground">
                 {proposal.status === "selected"
                   ? "Бизнес выбрал вашу команду. Договоритесь о первом шаге и покажите результат."
                   : proposal.status === "rejected"
@@ -741,25 +741,25 @@ function StudentInspector({
                 <ProposalDetails proposal={proposal} />
               </div>
               {proposal.milestoneConfirmed ? (
-                <p className="text-xs font-medium text-foreground">
+                <p className="text-[13px] font-semibold text-foreground">
                   Этап подтверждён · +10 баллов
                 </p>
               ) : null}
             </div>
           ) : task.status === "draft" ? (
-            <p className="text-xs leading-relaxed text-muted-foreground">
+            <p className="text-sm leading-relaxed text-muted-foreground">
               Отклик станет доступен после публикации задачи.
             </p>
           ) : team ? (
             <>
-              <p className="mb-4 text-xs leading-relaxed text-muted-foreground">
+              <p className="mb-4 text-sm leading-relaxed text-muted-foreground">
                 Расскажите, как команда подойдёт к задаче, сколько времени
                 понадобится и что вы уже успели проверить.
               </p>
               <ApplicationDialog task={task} team={team} onApply={onApply} />
             </>
           ) : (
-            <p className="text-xs leading-relaxed text-muted-foreground">
+            <p className="text-sm leading-relaxed text-muted-foreground">
               Выберите свою команду, чтобы предложить решение.
             </p>
           )}

@@ -20,15 +20,15 @@
   --secondary: #f0f0f0;
   --secondary-foreground: #303030;
   --muted: #f3f3f3;
-  --muted-foreground: #707070;
+  --muted-foreground: #646464;
   --accent: #eeeeee;
   --accent-foreground: #202020;
   --destructive: #ac4938;
   --border: #e7e7e7;
   --input: #dedede;
   --ring: #8c8c8c;
-  --workspace-surface: #fafafa;
-  --workspace-selected: #eeeeee;
+  --workspace-surface: #f7f7f7;
+  --workspace-selected: #e9e9e9;
   --workspace-selected-foreground: #202020;
   --chart-1: #8c8c8c;
   --chart-2: #888888;
@@ -170,7 +170,7 @@ textarea {
   height: 100%;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 12px;
 }
 
 /* Native scrolling, with the same quiet treatment in panels and portal dialogs. */
