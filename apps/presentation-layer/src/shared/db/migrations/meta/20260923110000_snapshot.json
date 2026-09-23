@@ -1,0 +1,122 @@
+{
+  "id": "a7cb881e-0db1-4cb2-a62d-004ad0040001",
+  "prevId": "1444c1a8-0c0b-4ef7-bd51-a74a75a7c71e",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.users": {
+      "name": "users", "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "serial", "primaryKey": true, "notNull": true },
+        "name": { "name": "name", "type": "text", "primaryKey": false, "notNull": true },
+        "email": { "name": "email", "type": "text", "primaryKey": false, "notNull": true },
+        "created_at": { "name": "created_at", "type": "timestamp", "primaryKey": false, "notNull": true, "default": "now()" }
+      },
+      "indexes": {}, "foreignKeys": {}, "compositePrimaryKeys": {},
+      "uniqueConstraints": { "users_email_unique": { "name": "users_email_unique", "nullsNotDistinct": false, "columns": ["email"] } },
+      "checkConstraints": {}, "policies": {}, "isRLSEnabled": false
+    },
+    "public.grill_session": {
+      "name": "grill_session", "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "serial", "primaryKey": true, "notNull": true },
+        "task_id": { "name": "task_id", "type": "text", "primaryKey": false, "notNull": true },
+        "status": { "name": "status", "type": "grill_session_status", "typeSchema": "public", "primaryKey": false, "notNull": true, "default": "'active'" },
+        "current_node": { "name": "current_node", "type": "text", "primaryKey": false, "notNull": false },
+        "current_block": { "name": "current_block", "type": "text", "primaryKey": false, "notNull": false },
+        "pushbacks": { "name": "pushbacks", "type": "jsonb", "primaryKey": false, "notNull": true, "default": "'{}'::jsonb" },
+        "skipped_nodes": { "name": "skipped_nodes", "type": "jsonb", "primaryKey": false, "notNull": true, "default": "'[]'::jsonb" },
+        "questions_asked": { "name": "questions_asked", "type": "integer", "primaryKey": false, "notNull": true, "default": 0 },
+        "version": { "name": "version", "type": "integer", "primaryKey": false, "notNull": true, "default": 0 },
+        "tags_state": { "name": "tags_state", "type": "grill_tags_state", "typeSchema": "public", "primaryKey": false, "notNull": true, "default": "'suggested'" },
+        "draft_checkpoint_state": { "name": "draft_checkpoint_state", "type": "grill_draft_checkpoint_state", "typeSchema": "public", "primaryKey": false, "notNull": true, "default": "'pending'" },
+        "created_at": { "name": "created_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" },
+        "updated_at": { "name": "updated_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" }
+      },
+      "indexes": {}, "foreignKeys": {}, "compositePrimaryKeys": {},
+      "uniqueConstraints": { "grill_session_task_id_unique": { "name": "grill_session_task_id_unique", "nullsNotDistinct": false, "columns": ["task_id"] } },
+      "checkConstraints": {
+        "grill_session_questions_asked_nonnegative": { "name": "grill_session_questions_asked_nonnegative", "value": "\"grill_session\".\"questions_asked\" >= 0" },
+        "grill_session_version_nonnegative": { "name": "grill_session_version_nonnegative", "value": "\"grill_session\".\"version\" >= 0" }
+      },
+      "policies": {}, "isRLSEnabled": false
+    },
+    "public.grill_turn": {
+      "name": "grill_turn", "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "serial", "primaryKey": true, "notNull": true },
+        "session_id": { "name": "session_id", "type": "integer", "primaryKey": false, "notNull": true },
+        "seq": { "name": "seq", "type": "integer", "primaryKey": false, "notNull": true },
+        "node": { "name": "node", "type": "text", "primaryKey": false, "notNull": true },
+        "question": { "name": "question", "type": "text", "primaryKey": false, "notNull": true },
+        "options": { "name": "options", "type": "text[]", "primaryKey": false, "notNull": true, "default": "'{}'" },
+        "is_pushback": { "name": "is_pushback", "type": "boolean", "primaryKey": false, "notNull": true, "default": false },
+        "answer": { "name": "answer", "type": "text", "primaryKey": false, "notNull": false },
+        "covered_nodes": { "name": "covered_nodes", "type": "text[]", "primaryKey": false, "notNull": true, "default": "'{}'" },
+        "specificity": { "name": "specificity", "type": "text", "primaryKey": false, "notNull": false },
+        "fallback_used": { "name": "fallback_used", "type": "boolean", "primaryKey": false, "notNull": true, "default": false },
+        "created_at": { "name": "created_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" }
+      },
+      "indexes": {},
+      "foreignKeys": { "grill_turn_session_id_grill_session_id_fk": { "name": "grill_turn_session_id_grill_session_id_fk", "tableFrom": "grill_turn", "tableTo": "grill_session", "schemaTo": "public", "columnsFrom": ["session_id"], "columnsTo": ["id"], "onDelete": "cascade", "onUpdate": "no action" } },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": { "grill_turn_session_seq_unique": { "name": "grill_turn_session_seq_unique", "nullsNotDistinct": false, "columns": ["session_id", "seq"] } },
+      "checkConstraints": { "grill_turn_seq_positive": { "name": "grill_turn_seq_positive", "value": "\"grill_turn\".\"seq\" > 0" } },
+      "policies": {}, "isRLSEnabled": false
+    },
+    "public.task_field": {
+      "name": "task_field", "schema": "",
+      "columns": {
+        "task_id": { "name": "task_id", "type": "text", "primaryKey": false, "notNull": true },
+        "node": { "name": "node", "type": "text", "primaryKey": false, "notNull": true },
+        "value": { "name": "value", "type": "text", "primaryKey": false, "notNull": false },
+        "state": { "name": "state", "type": "grill_field_state", "typeSchema": "public", "primaryKey": false, "notNull": true, "default": "'suggested'" },
+        "not_applicable": { "name": "not_applicable", "type": "boolean", "primaryKey": false, "notNull": true, "default": false },
+        "na_note": { "name": "na_note", "type": "text", "primaryKey": false, "notNull": false },
+        "source": { "name": "source", "type": "grill_field_source", "typeSchema": "public", "primaryKey": false, "notNull": true },
+        "source_quote": { "name": "source_quote", "type": "text", "primaryKey": false, "notNull": true },
+        "source_turn_id": { "name": "source_turn_id", "type": "integer", "primaryKey": false, "notNull": false },
+        "confirmed_at": { "name": "confirmed_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": false },
+        "created_at": { "name": "created_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" },
+        "updated_at": { "name": "updated_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" }
+      },
+      "indexes": {},
+      "foreignKeys": { "task_field_source_turn_id_grill_turn_id_fk": { "name": "task_field_source_turn_id_grill_turn_id_fk", "tableFrom": "task_field", "tableTo": "grill_turn", "schemaTo": "public", "columnsFrom": ["source_turn_id"], "columnsTo": ["id"], "onDelete": "set null", "onUpdate": "no action" } },
+      "compositePrimaryKeys": { "task_field_pk": { "name": "task_field_pk", "columns": ["task_id", "node"] } },
+      "uniqueConstraints": {},
+      "checkConstraints": { "task_field_na_note_required": { "name": "task_field_na_note_required", "value": "NOT \"task_field\".\"not_applicable\" OR \"task_field\".\"na_note\" IS NOT NULL" } },
+      "policies": {}, "isRLSEnabled": false
+    },
+    "public.criterion": {
+      "name": "criterion", "schema": "",
+      "columns": {
+        "task_id": { "name": "task_id", "type": "text", "primaryKey": false, "notNull": true },
+        "position": { "name": "position", "type": "integer", "primaryKey": false, "notNull": true },
+        "metric": { "name": "metric", "type": "text", "primaryKey": false, "notNull": true },
+        "threshold": { "name": "threshold", "type": "text", "primaryKey": false, "notNull": true },
+        "threshold_has_number": { "name": "threshold_has_number", "type": "boolean", "primaryKey": false, "notNull": true, "default": false },
+        "how_to_check": { "name": "how_to_check", "type": "text", "primaryKey": false, "notNull": true },
+        "state": { "name": "state", "type": "grill_field_state", "typeSchema": "public", "primaryKey": false, "notNull": true, "default": "'suggested'" },
+        "source_quote": { "name": "source_quote", "type": "text", "primaryKey": false, "notNull": true },
+        "source_turn_id": { "name": "source_turn_id", "type": "integer", "primaryKey": false, "notNull": false },
+        "created_at": { "name": "created_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" },
+        "updated_at": { "name": "updated_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" }
+      },
+      "indexes": {},
+      "foreignKeys": { "criterion_source_turn_id_grill_turn_id_fk": { "name": "criterion_source_turn_id_grill_turn_id_fk", "tableFrom": "criterion", "tableTo": "grill_turn", "schemaTo": "public", "columnsFrom": ["source_turn_id"], "columnsTo": ["id"], "onDelete": "set null", "onUpdate": "no action" } },
+      "compositePrimaryKeys": { "criterion_pk": { "name": "criterion_pk", "columns": ["task_id", "position"] } },
+      "uniqueConstraints": {},
+      "checkConstraints": { "criterion_position_range": { "name": "criterion_position_range", "value": "\"criterion\".\"position\" BETWEEN 1 AND 3" } },
+      "policies": {}, "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.grill_session_status": { "name": "grill_session_status", "schema": "public", "values": ["active", "finished"] },
+    "public.grill_field_state": { "name": "grill_field_state", "schema": "public", "values": ["suggested", "confirmed"] },
+    "public.grill_field_source": { "name": "grill_field_source", "schema": "public", "values": ["draft", "turn", "manual"] },
+    "public.grill_tags_state": { "name": "grill_tags_state", "schema": "public", "values": ["suggested", "confirmed"] },
+    "public.grill_draft_checkpoint_state": { "name": "grill_draft_checkpoint_state", "schema": "public", "values": ["pending", "confirmed"] }
+  },
+  "schemas": {}, "sequences": {}, "roles": {}, "policies": {}, "views": {},
+  "_meta": { "columns": {}, "schemas": {}, "tables": {} }
+}
