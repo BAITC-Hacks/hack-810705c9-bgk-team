@@ -6,3 +6,5 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
+
+export * from './schema-task-match';
