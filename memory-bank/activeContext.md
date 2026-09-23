@@ -1,5 +1,18 @@
 # Active Context
 
+## 2026-09-23 — Интерактивный чат менеджера через Mastra (feedback /)
+
+Фидбек по дизайну страницы `/`: «используй mastra-клиент и сделай часть менеджера — создателя задач — интерактивной за счёт работы с apps/ai-logic-layer». Центральная панель «Чат по задаче» раньше отвечала только детерминированными локальными строками; теперь реплики ассистента генерирует живой агент Mastra, а локальные ответы стали fallback'ом (концепция — `docs/adr/011-interactive-task-manager-assistant.md`, Proposed):
+
+- **Агент** `task-manager-agent` (`apps/ai-logic-layer/src/mastra/agents/task-manager-agent.ts`, регистрация в `index.ts`): получает свежий снимок карточки (сводка полей, балл, расшифровка, отклики) + навык/текст; инструкции запрещают выдумывать факты, менять/публиковать карточку и выбирать команду; вывод plain text; `memory: sessionMemory`.
+- **BFF** `POST /api/assistant` (`app/api/assistant/route.ts` → `src/shared/api/assistant-route.ts`): zod-контракт `src/shared/api/contracts/assistant.ts` (400/422 в формате ADR-009), вызов `askTaskManagerAgent()` (`src/shared/api/mastra.ts`, `@mastra/client-js`, `MASTRA_API_URL`, таймаут 15 с через `AbortSignal`, `memory: { thread: sessionId:taskId, resource: "workspace-business" }` — **Mastra требует `resource` для memory-thread, без неё 400**).
+- **Сбой AI — не ошибка HTTP**: `200 { reply, fallbackUsed: true }` → клиент (`src/_pages/workspace/api/assistant-client.ts`, таймаут 20 с) возвращает `null` → UI показывает честное сообщение «Ассистент сейчас недоступен…». **Хардкод ответов чата вырезан полностью** (решение команды): `runChatSkill` и все локальные заглушки удалены; ветка ответа в поле — локальная мутация, но реплика ассистента тоже идёт через Mastra.
+- **UI**: `sendMessage` в `workspace-page.tsx` — async (user-реплика сразу, ответ ассистента потом, состояние `assistantPending` по ключу беседы); `chat-panel.tsx` — индикатор «печатает…», блокировка отправки, подписи «Ассистент · Mastra»; контекст строит чистая `buildAssistantContext()` (`src/entities/workspace/assistant.ts`).
+
+Проверено: `bun run check-types` (turbo, 3/3) зелёный; `bun test` в presentation-layer — 18/18 (5 новых в `src/shared/api/assistant.test.ts`: контракт 400/422-кейсы + изоляция откликов контекста); live `POST /api/assistant` → `200 fallbackUsed:false` с grounded-ответом на clarify и короткий follow-up в том же thread (memory работает); невалидный запрос → `422` с details; когда у агента не было `resource` — вживую подтверждён ветка `fallbackUsed: true`; `GET /` → 200. Lint: 27 проблем — идентично baseline до изменений (1 pre-existing error `Cannot access refs during render` в `workspace-page.tsx`, не трогал). Непроверено вживью: ветка fallback при остановленной Mastra (намеренно не останавливал dev-сервер), поведение в браузере (ручной прогон чата).
+
+Изменено: `apps/ai-logic-layer/src/mastra/{index.ts,agents/task-manager-agent.ts (новый)}`; `apps/presentation-layer/{app/api/assistant/route.ts, src/shared/api/{contracts/assistant,mastra,assistant-route,assistant.test}.ts (новые), src/_pages/workspace/api/assistant-client.ts (новый), src/entities/workspace/{assistant.ts (новый),index.ts}, src/_pages/workspace/ui/{workspace-page,chat-panel}.tsx}`; `docs/adr/{011-interactive-task-manager-assistant.md (новый),README.md}`.
+
 ## 2026-09-23 — Агент оценки готовности задачи (apps/ai-logic-layer)
 
 `taskEvaluatorAgent` — отдельный чат-агент ВНЕ воркфлоу (пользователь сам присылает текст задачи), отвечает строгим markdown-отчётом на языке задачи:

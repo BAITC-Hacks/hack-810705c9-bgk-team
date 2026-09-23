@@ -1,4 +1,5 @@
 export { getDemoData } from "./demo-data";
+export { buildAssistantContext } from "./assistant";
 export {
   TASK_FIELDS,
   calculateScore,

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { getDemoData } from "@/entities/workspace";
-import { getMentionRange, removeMention, runChatSkill } from "./chat-skills";
+import { getMentionRange, removeMention } from "./chat-skills";
 
 describe("composer mentions", () => {
   it("recognizes standalone Russian and English skill queries", () => {
@@ -29,67 +28,3 @@ describe("composer mentions", () => {
   });
 });
 
-describe("local business skills", () => {
-  it("uses confirmed readiness and leaves all data unchanged", () => {
-    const data = getDemoData();
-    const snapshot = JSON.stringify(data);
-    const answer = runChatSkill(
-      data.tasks[0],
-      data.proposals,
-      data.teams,
-      "readiness",
-      "Что улучшить?",
-    );
-    assert.match(answer, /Готовность: 70 \/ 100/);
-    assert.match(answer, /Ваше уточнение: «Что улучшить\?»/);
-    assert.match(answer, /после подтверждения/);
-    assert.equal(JSON.stringify(data), snapshot);
-  });
-
-  it("compares only actual proposals for the selected task without choosing a team", () => {
-    const data = getDemoData();
-    const task = data.tasks[0];
-    const snapshot = JSON.stringify(data);
-    const answer = runChatSkill(
-      task,
-      data.proposals,
-      data.teams,
-      "compare",
-      "",
-    );
-    for (const proposal of data.proposals.filter(
-      ({ taskId }) => taskId === task.id,
-    )) {
-      assert.ok(answer.includes(proposal.idea));
-      assert.ok(answer.includes(proposal.plan));
-      assert.ok(answer.includes(proposal.timeline));
-    }
-    const unrelated = data.proposals.find(({ taskId }) => taskId !== task.id);
-    assert.ok(unrelated);
-    assert.ok(!answer.includes(unrelated.idea));
-    assert.match(answer, /выбор остаётся за вами/);
-    assert.equal(JSON.stringify(data), snapshot);
-  });
-
-  it("asks for missing success values and handles an empty proposal list", () => {
-    const data = getDemoData();
-    const task = {
-      ...data.tasks[0],
-      fields: { ...data.tasks[0].fields, success: "", outcome: "" },
-    };
-    const criteria = runChatSkill(
-      task,
-      data.proposals,
-      data.teams,
-      "success",
-      "",
-    );
-    assert.match(criteria, /Критерий успеха пока не заполнен/);
-    assert.match(criteria, /\[значение или сценарий\]/);
-    assert.match(criteria, /нужно указать вам/);
-    assert.match(
-      runChatSkill(task, [], data.teams, "compare", ""),
-      /пока нет откликов/,
-    );
-  });
-});

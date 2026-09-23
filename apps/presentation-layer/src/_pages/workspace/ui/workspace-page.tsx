@@ -22,6 +22,7 @@ import type {
 } from "react-resizable-panels";
 import { toast } from "sonner";
 import {
+  buildAssistantContext,
   calculateScore,
   createTask,
   getDemoData,
@@ -62,8 +63,9 @@ import {
 } from "@/shared/components/ui/resizable";
 import { Toaster } from "@/shared/components/ui/sonner";
 import { cn } from "@/shared/lib/utils";
+import { askTaskManager } from "../api/assistant-client";
 import { ChatPanel } from "./chat-panel";
-import { CHAT_SKILLS, runChatSkill, type ChatSkillId } from "./chat-skills";
+import { CHAT_SKILLS, type ChatSkillId } from "./chat-skills";
 import { NewTaskDialog } from "./new-task-dialog";
 import { TaskNavigation } from "./task-navigation";
 
@@ -103,6 +105,8 @@ export default function WorkspacePage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showDemo, setShowDemo] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
+  const [assistantPending, setAssistantPending] = useState<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
   const [navigationCollapsed, setNavigationCollapsed] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const panelsRef = useRef<GroupImperativeHandle>(null);
@@ -283,11 +287,10 @@ export default function WorkspacePage() {
   }
 
   function sendMessage(text: string, field?: TaskField, skill?: ChatSkillId) {
-    let response = "";
-    if (skill) {
-      response = runChatSkill(task, data.proposals, data.teams, skill, text);
-    } else if (field) {
-      const label = TASK_FIELDS.find((item) => item.key === field)?.label;
+    // Запись ответа в поле карточки — локальная мутация; реплику ассистента
+    // всё равно генерирует Mastra (хардкода ответов в чате больше нет).
+    let message = text;
+    if (field) {
       const update = (item: Task): Task => ({
         ...item,
         fields: { ...item.fields, [field]: text },
@@ -306,24 +309,49 @@ export default function WorkspacePage() {
           ),
         }));
       }
-      response = `Добавила ваш ответ в поле «${label}» без изменений.\n\nОткройте карточку, проверьте текст и подтвердите сведения — после этого пересчитается рейтинг.`;
-    } else {
-      response =
-        "Уточнение осталось в этой беседе. В демо-режиме выберите один из вопросов выше, чтобы записать ответ в нужное поле, или откройте «Карточку задачи».\n\nЯ не добавляю неподтверждённые факты и не публикую задачу за вас.";
+      const label = TASK_FIELDS.find((item) => item.key === field)?.label;
+      message = `Ответ в поле «${label}» записан в карточку (не подтверждён): ${text}`;
     }
+
+    appendMessages(conversationKey, [
+      {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: skill
+          ? `@${CHAT_SKILLS.find((item) => item.id === skill)?.label}${text ? `\n${text}` : ""}`
+          : text,
+      },
+    ]);
+
+    sessionIdRef.current ??= crypto.randomUUID();
+    const key = conversationKey;
+    setAssistantPending(key);
+    void askTaskManager({
+      threadId: `${sessionIdRef.current}:${task.id}`,
+      skill,
+      message,
+      context: buildAssistantContext(task, data.proposals, data.teams),
+    })
+      .then((reply) => {
+        appendMessages(key, [
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content:
+              reply?.reply ??
+              "Ассистент сейчас недоступен — Mastra не ответила. Попробуйте отправить сообщение ещё раз через минуту.",
+          },
+        ]);
+      })
+      .finally(() => {
+        setAssistantPending((current) => (current === key ? null : current));
+      });
+  }
+
+  function appendMessages(key: string, additions: Message[]) {
     setConversations((current) => ({
       ...current,
-      [conversationKey]: [
-        ...(current[conversationKey] ?? []),
-        {
-          id: crypto.randomUUID(),
-          role: "user",
-          content: skill
-            ? `@${CHAT_SKILLS.find((item) => item.id === skill)?.label}${text ? `\n${text}` : ""}`
-            : text,
-        },
-        { id: crypto.randomUUID(), role: "assistant", content: response },
-      ],
+      [key]: [...(current[key] ?? []), ...additions],
     }));
   }
 
@@ -440,6 +468,7 @@ export default function WorkspacePage() {
         key={task.id}
         task={task}
         messages={messages}
+        pending={assistantPending === conversationKey}
         onSend={sendMessage}
         onEdit={openCard}
         onShowProposals={showProposals}
@@ -827,7 +856,8 @@ export default function WorkspacePage() {
             </DialogTitle>
             <DialogDescription className="pt-2 leading-relaxed">
               Это интерактивный frontend с вымышленными задачами и командами.
-              Ассистент отвечает по подготовленным сценариям.
+              Ассистент отвечает через Mastra по данным карточки; если ИИ
+              недоступен — по локальным сценариям.
             </DialogDescription>
           </DialogHeader>
           <ol className="my-2 space-y-3 text-xs leading-relaxed">
@@ -845,8 +875,9 @@ export default function WorkspacePage() {
             ))}
           </ol>
           <p className="text-[11px] leading-relaxed text-muted-foreground">
-            Данные хранятся в памяти вкладки и сбрасываются при обновлении
-            страницы. Отправки во внешние сервисы нет.
+            Данные карточек хранятся в памяти вкладки и сбрасываются при
+            обновлении страницы. Сообщения ассистента отправляются в Mastra
+            (apps/ai-logic-layer).
           </p>
           <Button variant="outline" onClick={resetDemo} className="mt-2">
             Начать демо заново

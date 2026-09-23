@@ -21,6 +21,7 @@ workers содержит `example-queue`. Всё, что описано ниже
 | [008](008-demo-roles-and-access.md) | Cookie `tm_role`/`tm_actor`/`tm_view`, серверная проверка владения, журнал AI только для бизнеса-владельца | Proposed |
 | [009](009-bff-api-contract.md) | REST route handlers по ТЗ, общие zod-контракты, коды ошибок, транзакции вне вызовов Mastra | Proposed |
 | [010](010-acceptance-verification.md) | Три слоя проверки и матрица покрытия T-1–T-20 и сквозного пути | Proposed |
+| [011](011-interactive-task-manager-assistant.md) | Интерактивный чат менеджера через Mastra `task-manager-agent` + BFF `POST /api/assistant` с локальным fallback | Proposed |
 
 ## Противоречия в источниках
 

@@ -34,6 +34,7 @@ import {
 type Props = {
   task: Task;
   messages: Message[];
+  pending?: boolean;
   onSend: (text: string, field?: TaskField, skill?: ChatSkillId) => void;
   onEdit: () => void;
   onShowProposals: () => void;
@@ -63,6 +64,7 @@ type ChatOption = (typeof CHAT_OPTIONS)[number];
 export function ChatPanel({
   task,
   messages,
+  pending = false,
   onSend,
   onEdit,
   onShowProposals,
@@ -136,6 +138,7 @@ export function ChatPanel({
   }
 
   function send() {
+    if (pending) return;
     if (!input.trim() && !selectedSkill) return;
     onSend(
       input.trim(),
@@ -169,7 +172,7 @@ export function ChatPanel({
               <div className="mb-3 flex items-center gap-2">
                 <span className="text-[15px] font-bold">AI-Sana</span>
                 <span className="text-xs text-muted-foreground">
-                  Демо-ассистент
+                  Ассистент · Mastra
                 </span>
               </div>
               <p className="text-[15px] leading-[1.7]">
@@ -231,6 +234,31 @@ export function ChatPanel({
               </div>
             </div>
           ))}
+          {pending && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="flex items-start gap-3"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="mb-3 flex items-center gap-2">
+                  <span className="text-[15px] font-bold">AI-Sana</span>
+                  <span className="text-xs text-muted-foreground">
+                    печатает…
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 pt-1">
+                  {[0, 1, 2].map((dot) => (
+                    <span
+                      key={dot}
+                      className="size-1.5 animate-bounce rounded-full bg-muted-foreground/50"
+                      style={{ animationDelay: `${dot * 0.15}s` }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </ConversationContent>
         <ConversationScrollButton aria-label="К последнему сообщению" />
       </Conversation>
@@ -464,7 +492,7 @@ export function ChatPanel({
                 size="icon"
                 type="submit"
                 aria-label="Отправить сообщение"
-                disabled={!input.trim() && !selectedSkill}
+                disabled={pending || (!input.trim() && !selectedSkill)}
                 className="size-9 rounded-full disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
               >
                 <ArrowUp className="size-[18px]" />
@@ -473,7 +501,7 @@ export function ChatPanel({
           </div>
         </form>
         <p className="mt-2 text-center text-[11px] leading-normal text-muted-foreground">
-          Демо-ответы. Проверьте карточку перед публикацией.
+          Ответы ИИ по данным карточки. Проверьте карточку перед публикацией.
         </p>
       </div>
     </div>
