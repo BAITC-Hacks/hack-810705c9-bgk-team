@@ -76,7 +76,7 @@ Compose-сервисы:
 Turbo-задачи: `build` (dependsOn `^build`, outputs `.next/**`, `dist/**`, `.mastra/**`, env: `DATABASE_URL_*`, `RUSTFS_*`, `MASTRA_API_URL`, `OPENAI_API_KEY`); `dev` (persistent, без кэша); `lint`/`check-types` (dependsOn `^lint`/`^check-types`).
 
 Скрипты:
-- `./scripts/dev.sh` — compose up → ждёт Postgres → БД+vector → `bun install --frozen-lockfile` → `.env` из `.env.example` → db:migrate (generate выполняет автор схемы отдельно) → `bun run dev`; watchdog гасит инфру на выходе (`KEEP_INFRA=1` — оставить).
+- `./scripts/dev.sh` — compose up → ждёт Postgres → БД+vector → `bun install --frozen-lockfile` → `.env` из `.env.example` → db:migrate (generate выполняет автор схемы отдельно) → `bun run dev`; EXIT trap гасит инфру на выходе (`KEEP_INFRA=1` — оставить).
 - `./scripts/prod.sh` — валидация корневого `.env` → infra `--wait` → БД+vector → `db:deploy` (сервис migrate) → `up -d --build --wait` → проверка статусов контейнеров.
 
 ENV (корень `.env.example`): `POSTGRES_USER/PASSWORD`, `DB_NAME_NEXTJS=nextjs_db`, `DB_NAME_MASTRA=mastra_db`, `RUSTFS_ACCESS_KEY/SECRET_KEY`, `OPENAI_API_KEY`. У каждого приложения свой `.env.example`; `.env` не коммитится.

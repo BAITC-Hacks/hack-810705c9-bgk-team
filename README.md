@@ -45,7 +45,7 @@ Turborepo параллельно запустит:
 - Mastra на `http://localhost:4111`
 - Воркер pg-boss
 
-`Ctrl+C` останавливает dev-серверы, после чего watchdog гасит инфраструктуру (Postgres + RustFS). Оставить контейнеры запущенными после выхода: `KEEP_INFRA=1 ./scripts/dev.sh`. Остановить инфраструктуру вручную: `docker compose -f docker-compose.dev.yml stop`.
+`Ctrl+C` останавливает dev-серверы, после чего EXIT trap гасит инфраструктуру (Postgres + RustFS). Оставить контейнеры запущенными после выхода: `KEEP_INFRA=1 ./scripts/dev.sh`. Остановить инфраструктуру вручную: `docker compose -f docker-compose.dev.yml stop`.
 
 ### Полезные команды
 

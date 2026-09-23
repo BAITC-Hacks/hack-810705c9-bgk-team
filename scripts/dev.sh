@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-shot dev bootstrap: infra → DB → deps → migrations → bun run dev
-# Ctrl+C останавливает dev-серверы как обычно, после чего watchdog гасит инфраструктуру
+# Ctrl+C останавливает dev-серверы как обычно, после чего EXIT trap гасит инфраструктуру
 # (KEEP_INFRA=1 — оставить контейнеры запущенными).
 set -euo pipefail
 
@@ -95,32 +95,12 @@ cleanup() {
     return
   fi
   SHUTTING_DOWN=1
-  trap - EXIT INT TERM
+  trap - EXIT INT TERM HUP
   stop_infra
   exit "$rc"
 }
 
-trap cleanup EXIT INT TERM
-
-# dev-серверы запускаются через exec (PID скрипта сохраняется), поэтому уборку после
-# них делает watchdog: он ждёт завершения этого PID и гасит контейнеры.
-start_infra_watchdog() {
-  local main_pid="$1"
-  (
-    # watchdog обязан пережить Ctrl+C / SIGTERM / закрытие терминала (сигнал приходит
-    # всей process group), иначе уборка инфраструктуры просто не выполнится.
-    trap '' INT TERM HUP
-    local state
-    while kill -0 "$main_pid" 2>/dev/null; do
-      state="$(ps -o state= -p "$main_pid" 2>/dev/null | tr -d ' ')"
-      if [ -z "$state" ] || [ "$state" = "Z" ]; then
-        break
-      fi
-      sleep 1
-    done
-    stop_infra
-  ) &
-}
+trap cleanup EXIT INT TERM HUP
 
 log "Checking prerequisites"
 require_cmd docker
@@ -154,7 +134,5 @@ log "Starting dev servers (Next :3000, Mastra :4111, workers)"
 echo "Ctrl+C stops the dev servers; the Docker infra is stopped right after."
 echo "Leave infra running after exit: KEEP_INFRA=1 ./scripts/dev.sh"
 
-start_infra_watchdog "$$"
-
-trap - EXIT INT TERM
-exec bun run dev
+# Keep the shell alive so EXIT reliably stops this project's infrastructure.
+bun run dev
