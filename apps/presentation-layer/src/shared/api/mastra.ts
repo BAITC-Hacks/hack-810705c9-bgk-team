@@ -12,8 +12,8 @@ const ASSISTANT_RESOURCE_ID = "workspace-business";
 
 let client: MastraClient | undefined;
 
-/** Server-only клиент Mastra (BFF); в браузер не попадает — у него свой fetch. */
-function getMastraClient(): MastraClient {
+/** server-only: экспонируется для BFF-хендлеров evaluate/grill. */
+export function getMastraClient(): MastraClient {
   client ??= new MastraClient({
     baseUrl: process.env.MASTRA_API_URL || "http://localhost:4111",
   });

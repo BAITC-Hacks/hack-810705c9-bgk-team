@@ -22,15 +22,23 @@ import type {
 } from "react-resizable-panels";
 import { toast } from "sonner";
 import {
+  applyGrillPackage,
   buildAssistantContext,
   calculateScore,
   createTask,
   getDemoData,
+  getTaskSummary,
+  isRoundPayload,
+  isTranslatorPayload,
+  parseFinalOutput,
   TASK_FIELDS,
   type Message,
   type Role,
+  type RoundPayload,
   type Task,
   type TaskField,
+  type TaskRating,
+  type TranslatorPayload,
   type WorkspaceData,
 } from "@/entities/workspace";
 import { TaskEditor, type TaskEditorDraft } from "@/features/task-editor";
@@ -63,13 +71,40 @@ import {
 } from "@/shared/components/ui/resizable";
 import { Toaster } from "@/shared/components/ui/sonner";
 import { cn } from "@/shared/lib/utils";
-import { askTaskManager } from "../api/assistant-client";
+import { askTaskManager, evaluateTask, runGrill } from "../api/assistant-client";
+import type { RatingReport } from "@/shared/api/contracts/assistant";
 import { ChatPanel } from "./chat-panel";
+import {
+  formatRatingMessage,
+  formatRoundMessage,
+  formatTranslatorMessage,
+  GRILL_FINISHED_MESSAGE,
+  GRILL_INTRO_MESSAGE,
+  parseRoundAnswers,
+  parseTargetLanguages,
+  RATING_ERROR_MESSAGE,
+  RATING_LEVEL_LABELS,
+} from "./chat-flow";
 import { CHAT_SKILLS, type ChatSkillId } from "./chat-skills";
 import { NewTaskDialog } from "./new-task-dialog";
 import { TaskNavigation } from "./task-navigation";
 
 const COMPACT_QUERY = "(max-width: 1099px)";
+
+type GrillSession =
+  | {
+      runId: string;
+      step: string | string[];
+      kind: "round";
+      payload: RoundPayload;
+    }
+  | {
+      runId: string;
+      step: string | string[];
+      kind: "translator";
+      payload: TranslatorPayload;
+    };
+
 function subscribeCompact(onChange: () => void) {
   const media = window.matchMedia(COMPACT_QUERY);
   media.addEventListener("change", onChange);
@@ -107,6 +142,10 @@ export default function WorkspacePage() {
   const [focusMode, setFocusMode] = useState(false);
   const [assistantPending, setAssistantPending] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  /** Активная прожарка по задачам: run + suspend-шаг + payload вопросов. */
+  const [grillSessions, setGrillSessions] = useState<
+    Record<string, GrillSession>
+  >({});
   const [navigationCollapsed, setNavigationCollapsed] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const panelsRef = useRef<GroupImperativeHandle>(null);
@@ -287,6 +326,16 @@ export default function WorkspacePage() {
   }
 
   function sendMessage(text: string, field?: TaskField, skill?: ChatSkillId) {
+    // Идёт прожарка — весь текст уходит в воркфлоу как ответы на вопросы.
+    const activeGrill = grillSessions[conversationKey];
+    if (activeGrill && !field && !skill && text.trim()) {
+      appendMessages(conversationKey, [
+        { id: crypto.randomUUID(), role: "user", content: text },
+      ]);
+      void resumeGrill(task, activeGrill, text);
+      return;
+    }
+
     // Запись ответа в поле карточки — локальная мутация; реплику ассистента
     // всё равно генерирует Mastra (хардкода ответов в чате больше нет).
     let message = text;
@@ -355,6 +404,235 @@ export default function WorkspacePage() {
     }));
   }
 
+  function applyRating(taskId: string, report: RatingReport) {
+    const rating: TaskRating = {
+      score: report.score,
+      level: report.level,
+      verdict: report.verdict,
+      evaluatedAt: new Date().toISOString(),
+    };
+    setData((current) => ({
+      ...current,
+      tasks: current.tasks.map((item) =>
+        item.id === taskId ? { ...item, rating } : item,
+      ),
+    }));
+    setTaskDrafts((current) =>
+      current[taskId]
+        ? { ...current, [taskId]: { ...current[taskId], rating } }
+        : current,
+    );
+  }
+
+  /** Шаги 1 и 3 флоу: оценка задачи агентом task-evaluator-agent. */
+  async function runEvaluation(target: Task, userMessage?: string) {
+    const key = target.id;
+    if (userMessage)
+      appendMessages(key, [
+        { id: crypto.randomUUID(), role: "user", content: userMessage },
+      ]);
+    sessionIdRef.current ??= crypto.randomUUID();
+    setAssistantPending(key);
+    try {
+      const res = await evaluateTask({
+        threadId: `eval:${sessionIdRef.current}:${target.id}`,
+        taskSummary: getTaskSummary(target),
+      });
+      const content = res?.report
+        ? formatRatingMessage(res.report)
+        : (res?.error ?? RATING_ERROR_MESSAGE);
+      if (res?.report) applyRating(target.id, res.report);
+      appendMessages(key, [
+        { id: crypto.randomUUID(), role: "assistant", content },
+      ]);
+    } finally {
+      setAssistantPending((current) => (current === key ? null : current));
+    }
+  }
+
+  /** Шаг 2 флоу: запуск воркфлоу прожарки из чата. */
+  function startGrill() {
+    if (grillSessions[task.id]) {
+      toast.info("Прожарка уже идёт — отвечайте на вопросы в чате.");
+      return;
+    }
+    const key = task.id;
+    const target = task;
+    appendMessages(key, [
+      {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: "@Запустить прожарку",
+      },
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: GRILL_INTRO_MESSAGE,
+      },
+    ]);
+    setAssistantPending(key);
+    void runGrill({
+      action: "start",
+      seedIdea: target.description,
+      language: "ru",
+    })
+      .then((res) => handleGrillResponse(target, res))
+      .finally(() => setAssistantPending((c) => (c === key ? null : c)));
+  }
+
+  async function resumeGrill(
+    target: Task,
+    session: GrillSession,
+    text: string,
+  ) {
+    const key = target.id;
+    let resumeData: Record<string, unknown>;
+    if (session.kind === "round") {
+      const answers = parseRoundAnswers(text, session.payload.questions);
+      if (!answers.length) {
+        appendMessages(key, [
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: "Ответ пустой — напишите текст ответа на вопросы выше.",
+          },
+        ]);
+        return;
+      }
+      resumeData = { answers };
+    } else {
+      const targetLanguages = parseTargetLanguages(text);
+      if (!targetLanguages.length) {
+        appendMessages(key, [
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content:
+              "Не распознал языки. Напишите через запятую, например: русский, английский.",
+          },
+        ]);
+        return;
+      }
+      resumeData = { targetLanguages };
+    }
+
+    setAssistantPending(key);
+    try {
+      const res = await runGrill({
+        action: "resume",
+        runId: session.runId,
+        step: session.step,
+        resumeData,
+      });
+      handleGrillResponse(target, res);
+    } finally {
+      setAssistantPending((current) => (current === key ? null : current));
+    }
+  }
+
+  /** Ответ воркфлоу: вопросы → следующий suspend; успех → карточка + оценка. */
+  function handleGrillResponse(
+    target: Task,
+    res: Awaited<ReturnType<typeof runGrill>>,
+  ) {
+    const key = target.id;
+    if (!res || res.status === "failed") {
+      appendMessages(key, [
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: `Прожарку не удалось продолжить: ${res?.error ?? "Mastra недоступна"}. Попробуйте позже.`,
+        },
+      ]);
+      return;
+    }
+
+    if (res.status === "suspended") {
+      const step = res.suspended?.[0] ?? "";
+      const payload = res.payload;
+      if (isRoundPayload(payload)) {
+        setGrillSessions((current) => ({
+          ...current,
+          [key]: { runId: res.runId, step, kind: "round", payload },
+        }));
+        appendMessages(key, [
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: formatRoundMessage(payload),
+          },
+        ]);
+      } else if (isTranslatorPayload(payload)) {
+        setGrillSessions((current) => ({
+          ...current,
+          [key]: { runId: res.runId, step, kind: "translator", payload },
+        }));
+        appendMessages(key, [
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: formatTranslatorMessage(payload.question),
+          },
+        ]);
+      } else {
+        appendMessages(key, [
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content:
+              "Прожарка вернула неизвестный шаг, попробуйте запустить заново.",
+          },
+        ]);
+      }
+      return;
+    }
+
+    // success: пакет применён к карточке, затем повторная оценка (шаг 3).
+    setGrillSessions((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+    const output = parseFinalOutput(res.result);
+    if (!output) {
+      appendMessages(key, [
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: "Прожарка завершилась, но итоговый пакет не распознан.",
+        },
+      ]);
+      return;
+    }
+    const updated = applyGrillPackage(target, output);
+    setData((current) => ({
+      ...current,
+      tasks: current.tasks.map((item) =>
+        item.id === updated.id ? updated : item,
+      ),
+    }));
+    setTaskDrafts((current) =>
+      current[updated.id]
+        ? {
+            ...current,
+            [updated.id]: {
+              ...current[updated.id],
+              fields: updated.fields,
+              confirmedFields: updated.confirmedFields,
+            },
+          }
+        : current,
+    );
+    appendMessages(key, [
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: GRILL_FINISHED_MESSAGE,
+      },
+    ]);
+    void runEvaluation(updated);
+  }
+
   function resetDemo() {
     const next = getDemoData();
     setData(next);
@@ -417,6 +695,15 @@ export default function WorkspacePage() {
                   ? "Опубликована"
                   : "Черновик"}
             </span>
+            {task.rating && (
+              <span
+                className="hidden shrink-0 rounded-md bg-primary/10 px-1.5 py-0.5 font-medium text-primary sm:inline"
+                title={task.rating.verdict}
+              >
+                · Рейтинг {task.rating.score} ·{" "}
+                {RATING_LEVEL_LABELS[task.rating.level]}
+              </span>
+            )}
           </div>
         </div>
         <div
@@ -473,6 +760,8 @@ export default function WorkspacePage() {
         onEdit={openCard}
         onShowProposals={showProposals}
         onShowShortcuts={() => setShortcutsOpen(true)}
+        onGrill={startGrill}
+        onEvaluate={() => void runEvaluation(task, "@Оценить задачу")}
       />
     </main>
   );
@@ -844,8 +1133,10 @@ export default function WorkspacePage() {
           setQuery("");
           selectTask(next.id);
           toast.success("Черновик создан", {
-            description: "Ответьте на вопросы или сразу откройте карточку.",
+            description: "Агент-оценщик проверяет первую версию идеи…",
           });
+          // Шаг 1 флоу: первая версия идеи → агент-оценщик → рейтинг в чат.
+          void runEvaluation(next);
         }}
       />
       <Dialog open={showDemo} onOpenChange={setShowDemo}>
@@ -856,8 +1147,8 @@ export default function WorkspacePage() {
             </DialogTitle>
             <DialogDescription className="pt-2 leading-relaxed">
               Это интерактивный frontend с вымышленными задачами и командами.
-              Ассистент отвечает через Mastra по данным карточки; если ИИ
-              недоступен — по локальным сценариям.
+              Оценку ставит агент-оценщик, прожарку ведёт воркфлоу — всё через
+              Mastra (apps/ai-logic-layer).
             </DialogDescription>
           </DialogHeader>
           <ol className="my-2 space-y-3 text-xs leading-relaxed">

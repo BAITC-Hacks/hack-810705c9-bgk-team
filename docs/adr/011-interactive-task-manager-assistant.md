@@ -74,8 +74,27 @@ Owner: team
 
 ## Verification
 
-- `bun run check-types` (turbo, 3 пакета) и `bun test`
-  (`src/shared/api/assistant.test.ts`, существующие тесты) в presentation-layer;
-- live: `POST /api/assistant` c контекстом демо-карточки → ответ ассистента;
-- live: невалидный запрос → `422`; Mastra внизу → `200` с `fallbackUsed: true`
-  (проверяется остановкой dev-сервера, опционально).
+- `bun run check-types` (turbo, 3 пакета) и `bun test` (контракты, контекст,
+  парсеры флоу) зелёные;
+- live: `POST /api/evaluate` → `200` с `RatingReport` (score/level/verdict/
+  breakdown), невалидный запрос → `422`;
+- live: `POST /api/grill` start → `suspended` с вопросами SMART-раунда,
+  resume с answers → следующий suspend (follow-up раунд). Полный прогон до
+  `success` вживую не гонялся (дорого по LLM), ветка покрыта контрактным
+  нормализованием `suspended → step → resumeData`;
+- **Попутно исправлен баг воркфлоу**: `PipelineState.draft: z.unknown()` в zod 4
+  требует presence ключа, а JSON-снапшот теряет `draft: undefined` — resume
+  падал с «Step input validation failed». Стало `z.unknown().optional()`.
+
+## Сценарий использования (мэнеджер в чате)
+
+1. Создание черновика → авто-вызов `POST /api/evaluate` → рейтинг в чате и
+   бейдж в шапке карточки.
+2. @-меню → «Запустить прожарку» → `POST /api/grill` (start) → воркфлоу
+   `stack1-result-control` задаёт вопросы стадиями; ответы бизнеса идут в
+   resume (парсер ответов/языков — `chat-flow.ts`).
+3. `success` → `applyGrillPackage` заполняет и подтверждает поля карточки →
+   автоматический повторный `POST /api/evaluate` (пересчёт «было → стало» в
+   том же thread оценщика).
+4. @-меню → «Оценить задачу» — внеочный пересчёт; публикация из карточки
+   не блокируется рейтингом (rating — опциональное поле Task).

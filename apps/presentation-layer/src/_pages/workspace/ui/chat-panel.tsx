@@ -10,7 +10,6 @@ import {
   Xmark,
 } from "@gravity-ui/icons";
 import {
-  calculateScore,
   suggestQuestions,
   TASK_FIELDS,
   type Message,
@@ -39,6 +38,8 @@ type Props = {
   onEdit: () => void;
   onShowProposals: () => void;
   onShowShortcuts: () => void;
+  onGrill: () => void;
+  onEvaluate: () => void;
 };
 
 const CHAT_OPTIONS = [
@@ -57,9 +58,32 @@ const CHAT_OPTIONS = [
     aliases: ["proposals", "отклики"],
     kind: "action" as const,
   },
+  {
+    id: "grill",
+    label: "Запустить прожарку",
+    description: "Воркфлоу: из сырой идеи собрать правильную задачу",
+    aliases: ["grill", "прожарка", "workflow"],
+    kind: "action" as const,
+  },
+  {
+    id: "evaluate",
+    label: "Оценить задачу",
+    description: "Пересчитать рейтинг агентом-оценщиком",
+    aliases: ["evaluate", "оцен", "рейтинг", "rating"],
+    kind: "action" as const,
+  },
 ];
 
-type ChatOption = (typeof CHAT_OPTIONS)[number];
+type SkillOrActionOption = (typeof CHAT_OPTIONS)[number];
+type QuestionOption = {
+  id: string;
+  label: string;
+  description: string;
+  aliases: string[];
+  kind: "question";
+  field: TaskField;
+};
+type ChatOption = SkillOrActionOption | QuestionOption;
 
 export function ChatPanel({
   task,
@@ -69,6 +93,8 @@ export function ChatPanel({
   onEdit,
   onShowProposals,
   onShowShortcuts,
+  onGrill,
+  onEvaluate,
 }: Props) {
   const [input, setInput] = useState("");
   const [answerField, setAnswerField] = useState<TaskField | undefined>();
@@ -79,8 +105,20 @@ export function ChatPanel({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const composerRef = useRef<HTMLFormElement>(null);
   const menuId = useId();
-  const questions = suggestQuestions(task);
-  const score = calculateScore(task);
+  // Вопросы карточки — динамические опции @-меню вместо статичного блока в чате.
+  const questionOptions: QuestionOption[] = suggestQuestions(task).map(
+    ({ field, question }) => {
+      const meta = TASK_FIELDS.find((item) => item.key === field);
+      return {
+        id: `field:${field}`,
+        label: meta?.label ?? field,
+        description: question,
+        aliases: [meta?.label ?? field, field],
+        kind: "question",
+        field,
+      };
+    },
+  );
   const field = TASK_FIELDS.find((item) => item.key === answerField);
   const skill = CHAT_SKILLS.find((item) => item.id === selectedSkill);
   const mention = getMentionRange(input, caret);
@@ -90,7 +128,7 @@ export function ChatPanel({
     menuMode === "mention"
       ? (mention?.query.toLocaleLowerCase("ru") ?? "")
       : "";
-  const options = CHAT_OPTIONS.filter((option) =>
+  const options = [...CHAT_OPTIONS, ...questionOptions].filter((option) =>
     [option.label, ...option.aliases].some((value) =>
       value.toLocaleLowerCase("ru").includes(query),
     ),
@@ -126,7 +164,14 @@ export function ChatPanel({
     setMenuMode(null);
     if (option.kind === "action") {
       if (option.id === "card") onEdit();
+      else if (option.id === "grill") onGrill();
+      else if (option.id === "evaluate") onEvaluate();
       else onShowProposals();
+      return;
+    }
+    if (option.kind === "question") {
+      setAnswerField(option.field);
+      setSelectedSkill(undefined);
       return;
     }
     setSelectedSkill(option.id);
@@ -167,53 +212,33 @@ export function ChatPanel({
               {task.description}
             </div>
           </div>
-          <div className="flex items-start gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="mb-3 flex items-center gap-2">
-                <span className="text-[15px] font-bold">AI-Sana</span>
-                <span className="text-xs text-muted-foreground">
-                  Ассистент · Mastra
-                </span>
+          {messages.length === 0 && !pending && (
+            <div className="max-w-[92%] rounded-xl border border-dashed bg-muted/40 px-4 py-3.5 text-sm leading-relaxed text-muted-foreground">
+              Напишите сообщение — ответит AI-Sana (ответы идут через Mastra по
+              данным карточки). Команды и навыки запускаются через{" "}
+              <kbd className="rounded border bg-background px-1.5 py-0.5 text-xs font-medium text-foreground">
+                @
+              </kbd>
+              : «Запустить прожарку», «Оценить задачу», «Открыть карточку» и
+              вопросы по заполнению карточки.
+              <div className="mt-2.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setMenuMode("manual");
+                    setActiveOption(0);
+                    inputRef.current?.focus();
+                  }}
+                  className="h-8 gap-1.5 rounded-lg px-2.5 text-xs"
+                >
+                  <At className="size-3.5" />
+                  Показать команды
+                </Button>
               </div>
-              <p className="text-[15px] leading-[1.7]">
-                {score === 100
-                  ? "Всё важное уже в карточке. Можно перейти к предложениям команд или уточнить детали задачи."
-                  : "Выберите вопрос, чтобы дополнить карточку задачи."}
-              </p>
-              {questions.length > 0 && (
-                <>
-                  <div className="mt-4 space-y-2">
-                    {questions.map((question, index) => (
-                      <button
-                        type="button"
-                        key={question.field}
-                        aria-pressed={answerField === question.field}
-                        onClick={() => {
-                          setAnswerField(question.field);
-                          setSelectedSkill(undefined);
-                          setMenuMode(null);
-                          inputRef.current?.focus();
-                        }}
-                        className={cn(
-                          "group flex w-full items-start gap-3 rounded-xl border px-3.5 py-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-primary",
-                          answerField === question.field
-                            ? "border-primary/35 bg-workspace-selected"
-                            : "border-transparent bg-muted/70 hover:bg-workspace-selected",
-                        )}
-                      >
-                        <span className="mt-0.5 w-3 shrink-0 text-xs font-semibold text-muted-foreground">
-                          {index + 1}
-                        </span>
-                        <span className="flex-1 text-sm leading-[1.6] font-medium">
-                          {question.question}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
             </div>
-          </div>
+          )}
           {messages.map((message) => (
             <div
               key={message.id}
@@ -312,7 +337,7 @@ export function ChatPanel({
                         className="flex size-7 shrink-0 items-center justify-center text-muted-foreground"
                         aria-hidden="true"
                       >
-                        {option.kind === "skill" ? (
+                        {option.kind === "skill" || option.kind === "question" ? (
                           <At className="size-4" />
                         ) : option.id === "card" ? (
                           <FileText className="size-4" />

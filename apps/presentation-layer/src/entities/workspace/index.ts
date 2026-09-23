@@ -1,6 +1,16 @@
 export { getDemoData } from "./demo-data";
 export { buildAssistantContext } from "./assistant";
 export {
+  applyGrillPackage,
+  isRoundPayload,
+  isTranslatorPayload,
+  parseFinalOutput,
+  type GrillFinalOutput,
+  type GrillQuestion,
+  type RoundPayload,
+  type TranslatorPayload,
+} from "./grill";
+export {
   TASK_FIELDS,
   calculateScore,
   createTask,
@@ -15,6 +25,7 @@ export type {
   Role,
   Task,
   TaskField,
+  TaskRating,
   Team,
   WorkspaceData,
 } from "./model";
