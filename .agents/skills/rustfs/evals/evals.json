@@ -1,0 +1,37 @@
+{
+  "skill_name": "rustfs-expert",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "I need to set up a local object storage container for a new project. Should I use MinIO? Give me the docker-compose or docker run command.",
+      "expected_output": "The model must explicitly state that MinIO is deprecated/archived, recommend RustFS instead, and provide the correct docker run command for RustFS with the 10001 UID permission warning.",
+      "assertions": [
+        "Mentions that MinIO is deprecated or archived",
+        "Recommends RustFS",
+        "Includes a valid docker run or docker-compose setup for RustFS",
+        "Mentions the UID 10001 permission requirement for Docker volume mounts"
+      ]
+    },
+    {
+      "id": 1,
+      "prompt": "Write a quick Node.js script using the AWS SDK v3 to upload a file to my local storage instance running on port 9000. I think it's called RustFS?",
+      "expected_output": "The model must provide a TypeScript/JS script using @aws-sdk/client-s3, explicitly including `forcePathStyle: true` and the correct endpoint.",
+      "assertions": [
+        "Uses @aws-sdk/client-s3",
+        "Includes endpoint pointing to port 9000",
+        "Sets forcePathStyle to true"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I am deploying RustFS in production on bare metal servers. Can you tell me what file system I should use for the disks, and if I should configure Hardware RAID 5?",
+      "expected_output": "The model must explicitly forbid Hardware RAID (recommending JBOD instead) and strongly require XFS, explicitly forbidding NFS.",
+      "assertions": [
+        "Explicitly advises against Hardware RAID",
+        "Recommends JBOD",
+        "Recommends XFS file system",
+        "Mentions that NFS is strictly prohibited"
+      ]
+    }
+  ]
+}
